@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { categoryUsage, removeCategory } from './categories'
+import { categoryNameTaken, categoryUsage, removeCategory } from './categories'
 import { defaultCategories } from './defaultCategories'
 import type { Account, Transaction } from './schemas'
 import { viewOf } from './scope'
@@ -128,6 +128,20 @@ describe('removeCategory', () => {
 
   it('weigert sich bei Hauptkategorien mit Unterkategorien', () => {
     expect(() => removeCategory(data, 'cat-wohnen', null)).toThrow(/Unterkategorien/)
+  })
+})
+
+describe('categoryNameTaken', () => {
+  const miete = categories.find((c) => c.id === MIETE)!
+  const at = { kind: miete.kind, parentId: miete.parentId }
+
+  it('erkennt denselben Namen an derselben Stelle, unabhängig von Schreibweise und Leerraum', () => {
+    expect(categoryNameTaken(categories, { ...at, name: ` ${miete.name.toUpperCase()} ` })).toBe(true)
+  })
+
+  it('lässt den Namen an anderer Stelle und für die bearbeitete Kategorie selbst zu', () => {
+    expect(categoryNameTaken(categories, { ...at, parentId: null, name: miete.name })).toBe(false)
+    expect(categoryNameTaken(categories, { ...at, name: miete.name }, MIETE)).toBe(false)
   })
 })
 

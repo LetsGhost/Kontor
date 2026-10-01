@@ -232,6 +232,7 @@ export function TransactionForm({
         {!isTransfer && (
           <Field label="Kategorie">
             <CategorySelect
+              creatable
               kind={draft.type === 'income' ? 'income' : 'expense'}
               value={draft.categoryId}
               onChange={(categoryId) => {
@@ -271,6 +272,7 @@ export function TransactionForm({
 
         {isTransfer && (
           <TransferCategoryField
+            creatable
             accountId={draft.accountId}
             transferAccountId={draft.transferAccountId}
             value={draft.categoryId}

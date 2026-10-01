@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { categoryUsage, childrenOf } from '../../../shared/categories'
+import { categoryNameTaken, categoryUsage, childrenOf } from '../../../shared/categories'
 import { FALLBACK_ICON } from '../../../shared/defaultCategories'
 import { useArea } from '../area'
 import { CategoryIcon, categoryIcons } from '../icons'
@@ -126,15 +126,7 @@ function CategoryForm({ target, onClose }: { target: FormTarget; onClose: () => 
     const parentId = parent?.id ?? null
 
     if (!trimmed) next.name = 'Bitte einen Namen eingeben'
-    else if (
-      categories.some(
-        (c) =>
-          c.id !== editing?.id &&
-          c.kind === kind &&
-          c.parentId === parentId &&
-          c.name.toLowerCase() === trimmed.toLowerCase()
-      )
-    ) {
+    else if (categoryNameTaken(categories, { kind, parentId, name: trimmed }, editing?.id)) {
       next.name = 'Diese Kategorie gibt es hier schon'
     }
 

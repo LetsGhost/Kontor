@@ -12,7 +12,23 @@ export function childrenOf(categories: Category[], id: string): Category[] {
   return categories.filter((c) => c.parentId === id)
 }
 
-type CategoryData = Pick<KontorData, 'categories' | 'transactions' | 'recurring' | 'budgets'>
+/** Ob es an derselben Stelle (gleiche Art, gleiche Hauptkategorie) schon eine Kategorie dieses Namens gibt. */
+export function categoryNameTaken(
+  categories: Category[],
+  candidate: Pick<Category, 'kind' | 'parentId' | 'name'>,
+  exceptId?: string
+): boolean {
+  const name = candidate.name.trim().toLowerCase()
+  return categories.some(
+    (c) =>
+      c.id !== exceptId &&
+      c.kind === candidate.kind &&
+      c.parentId === candidate.parentId &&
+      c.name.toLowerCase() === name
+  )
+}
+
+type CategoryData =Pick<KontorData, 'categories' | 'transactions' | 'recurring' | 'budgets'>
 
 /**
  * Entfernt eine Kategorie und hängt alles, was auf sie zeigt, an `replacementId` (null = ohne Kategorie).
