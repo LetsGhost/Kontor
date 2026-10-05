@@ -21,6 +21,32 @@ export function accountBalance(account: Account, transactions: Transaction[], on
   return balance
 }
 
+/**
+ * Summe der Kontostände am Ende jedes Tages in `dates`, wie `accountBalance` je Konto, wobei ein Konto erst ab
+ * seinem Startdatum zählt. Die Buchungen werden nur einmal durchlaufen statt einmal je Stichtag.
+ */
+export function balancesOn(accounts: Account[], transactions: Transaction[], dates: string[]): number[] {
+  const ids = new Set(accounts.map((a) => a.id))
+  const relevant = transactions
+    .filter((tx) => ids.has(tx.accountId) || (tx.transferAccountId !== null && ids.has(tx.transferAccountId)))
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const running = new Map(accounts.map((a) => [a.id, a.openingBalanceCents]))
+  const order = dates.map((date, index) => ({ date, index })).sort((a, b) => a.date.localeCompare(b.date))
+  const result: number[] = new Array(dates.length)
+
+  let next = 0
+  for (const { date, index } of order) {
+    for (; next < relevant.length && relevant[next].date <= date; next++) {
+      const tx = relevant[next]
+      for (const id of [tx.accountId, tx.transferAccountId]) {
+        if (id !== null && running.has(id)) running.set(id, running.get(id)! + effectOnAccount(tx, id))
+      }
+    }
+    result[index] = accounts.reduce((sum, a) => (a.openingDate <= date ? sum + running.get(a.id)! : sum), 0)
+  }
+  return result
+}
+
 export function todayIso(now = new Date()): string {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')

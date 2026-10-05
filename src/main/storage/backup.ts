@@ -12,10 +12,15 @@ const dateStamp = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 
 const timeStamp = (d: Date): string =>
   `${dateStamp(d)}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`
 
-/** Alles im Datenordner außer den Backups selbst und Resten abgebrochener Schreibvorgänge. */
+// Belege ändern sich nie und werden deshalb nicht mitgesichert, siehe attachments.ts.
+const ATTACHMENTS_DIR = 'attachments'
+
+/** Alles im Datenordner außer den Backups selbst, den Belegen und Resten abgebrochener Schreibvorgänge. */
 function dataEntries(dataDir: string): string[] {
   if (!existsSync(dataDir)) return []
-  return readdirSync(dataDir).filter((name) => name !== BACKUP_DIR && !name.endsWith('.tmp'))
+  return readdirSync(dataDir).filter(
+    (name) => name !== BACKUP_DIR && name !== ATTACHMENTS_DIR && !name.endsWith('.tmp')
+  )
 }
 
 /** Neueste zuerst. Die Namen beginnen mit einem Zeitstempel und sortieren deshalb chronologisch. */

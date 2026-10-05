@@ -1,3 +1,4 @@
+import { categoryParts } from './categories'
 import type { Category, Transaction, TransactionType } from './schemas'
 
 /** Macht Empfänger vergleichbar: "REWE Markt 4711 GmbH" und "Rewe Markt" sollen sich finden. */
@@ -49,21 +50,39 @@ const daysBetween = (from: string, to: string): number =>
 const decay = (date: string, today: string, halfLife: number): number =>
   0.5 ** (Math.max(0, daysBetween(date, today)) / halfLife)
 
-/** Wählbare Kategorien einer Buchungsart, absteigend nach der Summe der Gewichte ihrer Buchungen. */
+/**
+ * Wie gut ein früherer Betrag zum neuen passt, zwischen AMOUNT_FLOOR und 1. Bei Amazon sind 7,99 € eher das
+ * Abo, 45 € eher der Haushalt. Der Empfänger bleibt aber wichtiger, deshalb fällt das Gewicht nie auf null.
+ */
+const AMOUNT_FLOOR = 0.25
+
+export function amountCloseness(a: number, b: number): number {
+  if (a <= 0 || b <= 0) return 1
+  const ratio = Math.min(a, b) / Math.max(a, b)
+  return AMOUNT_FLOOR + (1 - AMOUNT_FLOOR) * ratio * ratio
+}
+
+/**
+ * Wählbare Kategorien einer Buchungsart, absteigend nach der Summe der Gewichte ihrer Buchungen.
+ * Der Teil einer Aufteilung zählt mit seinem Betrag; `weightOf` bekommt ihn als zweiten Wert.
+ */
 function rankCategories(
   type: TransactionType,
   transactions: Transaction[],
   categories: Category[],
-  weightOf: (tx: Transaction) => number
+  weightOf: (tx: Transaction, amountCents: number) => number
 ): string[] {
   if (type === 'transfer') return []
   const valid = new Set(categories.filter((c) => c.kind === type && !c.archived).map((c) => c.id))
   const scores = new Map<string, number>()
 
   for (const tx of transactions) {
-    if (tx.type !== type || !tx.categoryId || !valid.has(tx.categoryId)) continue
-    const weight = weightOf(tx)
-    if (weight > 0) scores.set(tx.categoryId, (scores.get(tx.categoryId) ?? 0) + weight)
+    if (tx.type !== type) continue
+    for (const part of categoryParts(tx)) {
+      if (!part.categoryId || !valid.has(part.categoryId)) continue
+      const weight = weightOf(tx, part.amountCents) * (part.amountCents / tx.amountCents)
+      if (weight > 0) scores.set(part.categoryId, (scores.get(part.categoryId) ?? 0) + weight)
+    }
   }
 
   return [...scores.entries()].sort(([, a], [, b]) => b - a).map(([id]) => id)
@@ -71,7 +90,8 @@ function rankCategories(
 
 /**
  * Kategorien, die ähnliche frühere Buchungen an diesen Empfänger hatten, die wahrscheinlichste zuerst.
- * Neuere Buchungen zählen stärker, damit sich geänderte Gewohnheiten durchsetzen.
+ * Neuere Buchungen zählen stärker, damit sich geänderte Gewohnheiten durchsetzen. Ist der Betrag bekannt,
+ * zählen frühere Buchungen mit ähnlichem Betrag stärker.
  */
 export function suggestCategories(
   payee: string,
@@ -79,14 +99,17 @@ export function suggestCategories(
   transactions: Transaction[],
   categories: Category[],
   today: string,
-  limit = 3
+  limit = 3,
+  amountCents: number | null = null
 ): string[] {
   const target = normalizePayee(payee)
   if (target.length < 2) return []
 
-  return rankCategories(type, transactions, categories, (tx) => {
+  return rankCategories(type, transactions, categories, (tx, partCents) => {
     const sim = similarity(target, normalizePayee(tx.payee))
-    return sim < MIN_SIMILARITY ? 0 : sim * sim * decay(tx.date, today, HALF_LIFE_DAYS)
+    if (sim < MIN_SIMILARITY) return 0
+    const amount = amountCents === null ? 1 : amountCloseness(amountCents, partCents)
+    return sim * sim * amount * decay(tx.date, today, HALF_LIFE_DAYS)
   }).slice(0, limit)
 }
 
@@ -96,9 +119,10 @@ export function suggestCategory(
   type: TransactionType,
   transactions: Transaction[],
   categories: Category[],
-  today: string
+  today: string,
+  amountCents: number | null = null
 ): string | null {
-  return suggestCategories(payee, type, transactions, categories, today, 1)[0] ?? null
+  return suggestCategories(payee, type, transactions, categories, today, 1, amountCents)[0] ?? null
 }
 
 /** Die in letzter Zeit am häufigsten benutzten Kategorien, unabhängig vom Empfänger. */

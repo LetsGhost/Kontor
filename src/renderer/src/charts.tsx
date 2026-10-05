@@ -10,6 +10,8 @@ export const GRID_COLOR = '#33302a'
 export const AXIS_TEXT = '#9c968a'
 export const BACKGROUND = '#141311'
 export const DANGER = '#e0695a'
+// Messing, wie --color-accent: für eine dritte Größe neben Einnahmen und Ausgaben, etwa die Sparquote.
+export const ACCENT = '#cfa858'
 
 export const longMonth = new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' })
 export const shortMonth = new Intl.DateTimeFormat('de-DE', { month: 'short', year: '2-digit' })

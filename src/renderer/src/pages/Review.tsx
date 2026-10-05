@@ -5,6 +5,7 @@ import { FALLBACK_ICON } from '../../../shared/defaultCategories'
 import { formatDate } from '../../../shared/draft'
 import { formatCents } from '../../../shared/money'
 import { latestReviewMonth, monthReview } from '../../../shared/review'
+import { YearView } from './YearReview'
 import { addMonths, monthOf } from '../../../shared/stats'
 import { useArea } from '../area'
 import { longMonth, monthDate as toDate } from '../charts'
@@ -20,6 +21,7 @@ export function Review() {
   const { area, ids } = useArea()
   const latest = latestReviewMonth(todayIso())
   const [month, setMonth] = useState(latest)
+  const [mode, setMode] = useState<'month' | 'year'>('month')
 
   // Weiter zurück als bis zur ersten Buchung des Bereichs gibt es nichts zu sehen.
   const firstMonth = useMemo(() => {
@@ -38,6 +40,26 @@ export function Review() {
       ),
     [transactions, categories, budgets, area.id, month, ids]
   )
+
+  const modeSwitch = (
+    <div className="grid grid-cols-2 gap-1 rounded-md border border-line p-0.5 text-sm">
+      {(['month', 'year'] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          aria-pressed={mode === m}
+          onClick={() => setMode(m)}
+          className={`rounded-sm px-3 py-1 ${mode === m ? 'bg-raised text-text' : 'text-muted hover:text-text'}`}
+        >
+          {m === 'month' ? 'Monat' : 'Jahr'}
+        </button>
+      ))}
+    </div>
+  )
+
+  if (mode === 'year' && firstMonth !== null) {
+    return <YearView firstYear={Number(firstMonth.slice(0, 4))} modeSwitch={modeSwitch} />
+  }
 
   if (firstMonth === null || firstMonth > latest) {
     return (
@@ -60,7 +82,10 @@ export function Review() {
   return (
     <div className="max-w-4xl space-y-10">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h1 className="text-2xl font-semibold">Rückblick</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-semibold">Rückblick</h1>
+          {modeSwitch}
+        </div>
         <div className="flex items-center gap-1">
           {month !== latest && (
             <Button small variant="ghost" onClick={() => setMonth(latest)}>
@@ -158,7 +183,7 @@ export function Review() {
                 <li key={t.id} className="flex items-center gap-3 py-2 text-sm">
                   <CategoryIcon name={iconOf(t.categoryId)} className="shrink-0 text-muted" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate">{t.payee || nameOf(t.categoryId)}</div>
+                    <div className="truncate">{t.payee || (t.splits.length > 0 ? 'Aufgeteilt' : nameOf(t.categoryId))}</div>
                     <div className="text-xs text-muted">
                       {formatDate(t.date)}
                       {t.recurringId !== null && ' · fest'}

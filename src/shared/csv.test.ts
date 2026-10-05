@@ -125,6 +125,8 @@ describe('buildCandidates', () => {
       transferAccountId: null,
       recurringId: null,
       importHash: null,
+      splits: [],
+      attachments: [],
       createdAt: ''
     }
     const candidates = buildCandidates(table, mapping, options([manual]))
@@ -145,6 +147,8 @@ describe('buildCandidates', () => {
       transferAccountId: null,
       recurringId: null,
       importHash: null,
+      splits: [],
+      attachments: [],
       createdAt: ''
     }
     expect(buildCandidates(table, mapping, options([earlier]))[1].categoryId).toBe('cat-lebensmittel-supermarkt')
@@ -172,7 +176,8 @@ describe('finishImport', () => {
     startDate: '2026-05-30',
     endDate: null,
     nextDueDate: '2026-05-30',
-    active: true
+    active: true,
+    contract: null
   }
 
   it('verknüpft passende Buchungen mit der Regel und rückt deren Termin weiter', () => {

@@ -25,6 +25,7 @@ const rule = (over: Partial<Recurring> = {}): Recurring => ({
   endDate: null,
   nextDueDate: '2026-01-01',
   active: true,
+  contract: null,
   ...over
 })
 
@@ -41,6 +42,8 @@ const tx = (date: string, over: Partial<Transaction> = {}): Transaction => ({
   transferAccountId: null,
   recurringId: null,
   importHash: null,
+  splits: [],
+  attachments: [],
   createdAt: '',
   ...over
 })

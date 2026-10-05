@@ -1,6 +1,7 @@
 import {
   CalendarCheck,
   ChartColumn,
+  FileSignature,
   FolderOpen,
   Landmark,
   Repeat,
@@ -10,21 +11,21 @@ import {
   TrendingUp,
   type LucideIcon
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Backups } from './Backups'
+import { Notices, ReminderSettings, useKeyboardShortcuts, useStartupReminders } from './shell'
 import { useDue } from './Due'
 import { useArea } from './area'
 import { Accounts } from './pages/Accounts'
 import { Categories } from './pages/Categories'
+import { Contracts } from './pages/Contracts'
 import { Forecast } from './pages/Forecast'
 import { Overview } from './pages/Overview'
 import { Recurring } from './pages/Recurring'
 import { Review } from './pages/Review'
 import { Transactions } from './pages/Transactions'
-import { useApp } from './store'
+import { useApp, type Page } from './store'
 import { Button, Section } from './ui'
-
-type Page = 'overview' | 'review' | 'forecast' | 'transactions' | 'recurring' | 'accounts' | 'categories' | 'settings'
 
 const pages: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: 'Übersicht', icon: ChartColumn },
@@ -32,6 +33,7 @@ const pages: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: 'forecast', label: 'Prognose', icon: TrendingUp },
   { id: 'transactions', label: 'Buchungen', icon: ScrollText },
   { id: 'recurring', label: 'Wiederkehrend', icon: Repeat },
+  { id: 'contracts', label: 'Verträge & Abos', icon: FileSignature },
   { id: 'accounts', label: 'Konten', icon: Landmark },
   { id: 'categories', label: 'Kategorien', icon: Tags },
   { id: 'settings', label: 'Einstellungen', icon: SettingsIcon }
@@ -45,11 +47,15 @@ export function App() {
   const setArea = useApp((s) => s.setArea)
   const { area, ids } = useArea()
   const dueCount = useDue(ids).length
-  const [page, setPage] = useState<Page>('overview')
+  const page = useApp((s) => s.page)
+  const setPage = useApp((s) => s.setPage)
 
   useEffect(() => {
     void reload()
   }, [reload])
+
+  useKeyboardShortcuts(status.kind === 'ready')
+  useStartupReminders(status.kind === 'ready')
 
   if (status.kind === 'loading') return null
   if (status.kind === 'error') return <LoadError file={status.file} message={status.message} />
@@ -87,13 +93,13 @@ export function App() {
             </select>
           </label>
         )}
-        {pages.map(({ id, label, icon: Icon }) => (
+        {pages.map(({ id, label, icon: Icon }, i) => (
           <button
             key={id}
             onClick={() => setPage(id)}
             aria-current={page === id ? 'page' : undefined}
             aria-label={label}
-            title={label}
+            title={`${label} (Strg+${i + 1})`}
             className={`relative flex items-center justify-center gap-2.5 border-l-2 py-2 text-left text-sm lg:justify-start lg:px-[18px] ${
               page === id ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'
             }`}
@@ -118,11 +124,13 @@ export function App() {
           {page === 'forecast' && <Forecast />}
           {page === 'transactions' && <Transactions onGoToAccounts={() => setPage('accounts')} />}
           {page === 'recurring' && <Recurring />}
+          {page === 'contracts' && <Contracts />}
           {page === 'accounts' && <Accounts />}
           {page === 'categories' && <Categories />}
           {page === 'settings' && <Settings />}
         </div>
       </main>
+      <Notices />
     </div>
   )
 }
@@ -156,10 +164,40 @@ function Settings() {
       <Section title="Datenordner">
         <DataFolder path={info?.dataDir ?? ''} />
       </Section>
+      <Section title="Erinnerungen">
+        <ReminderSettings />
+      </Section>
       <Section title="Backups">
         <Backups allowCreate />
       </Section>
+      <Section title="Tastenkürzel">
+        <Shortcuts />
+      </Section>
     </div>
+  )
+}
+
+const shortcuts: [string, string][] = [
+  ['Strg+1 … Strg+9', 'Seiten der Navigation'],
+  ['Strg+N', 'Neue Buchung (unter „Buchungen“)'],
+  ['Strg+F', 'Buchungen durchsuchen'],
+  ['↑ ↓', 'In der Buchungsliste von Zeile zu Zeile'],
+  ['Enter', 'Buchung bearbeiten'],
+  ['Leertaste', 'Buchung auswählen'],
+  ['Entf', 'Buchung löschen (rückgängig machbar)'],
+  ['Strg+A', 'Alle angezeigten Buchungen auswählen']
+]
+
+function Shortcuts() {
+  return (
+    <dl className="ledger text-sm">
+      {shortcuts.map(([keys, label]) => (
+        <div key={keys} className="flex gap-4 py-2">
+          <dt className="num w-40 shrink-0 text-muted">{keys}</dt>
+          <dd>{label}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 

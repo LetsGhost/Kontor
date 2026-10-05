@@ -1,7 +1,9 @@
-import { BrowserWindow, app, ipcMain, shell } from 'electron'
-import { join } from 'node:path'
+import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { extname, join } from 'node:path'
 import type { AppInfo, LoadResult } from '../shared/api'
 import type { CollectionName } from '../shared/schemas'
+import { attachmentPath, pruneAttachments, saveAttachment } from './storage/attachments'
 import { createBackup, ensureDailyBackup, listBackups, restoreBackup } from './storage/backup'
 import { StorageError } from './storage/files'
 import { Store } from './storage/store'
@@ -12,6 +14,18 @@ const isDev = !app.isPackaged
 app.setPath('userData', join(app.getPath('appData'), isDev ? 'Kontor-dev' : 'Kontor'))
 
 const store = new Store(join(app.getPath('userData'), 'data'))
+
+// Ohne eigene App-ID zeigt Windows keine Benachrichtigungen an oder ordnet sie Electron zu.
+app.setAppUserModelId(isDev ? 'de.kontor.app.dev' : 'de.kontor.app')
+
+const EXPORT_FILTERS: Record<string, Electron.FileFilter> = {
+  '.csv': { name: 'CSV (Excel, Semikolon)', extensions: ['csv'] },
+  '.xlsx': { name: 'Excel-Arbeitsmappe', extensions: ['xlsx'] }
+}
+
+function mainWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows()[0]
+}
 
 function load(): LoadResult {
   try {
@@ -42,6 +56,31 @@ function registerIpc(): void {
   ipcMain.handle('restoreBackup', (_e, name: string) => restoreBackup(store.dataDir, name))
   ipcMain.handle('openDataFolder', async () => {
     await shell.openPath(store.dataDir)
+  })
+  ipcMain.handle('addAttachment', (_e, bytes: Uint8Array, type: string) =>
+    saveAttachment(store.dataDir, bytes, type)
+  )
+  ipcMain.handle('readAttachment', (_e, name: string) => readFileSync(attachmentPath(store.dataDir, name)))
+  ipcMain.handle('openAttachment', async (_e, name: string) => {
+    const error = await shell.openPath(attachmentPath(store.dataDir, name))
+    if (error) throw new Error(error)
+  })
+  ipcMain.handle('saveExport', async (_e, defaultName: string, bytes: Uint8Array) => {
+    const filter = EXPORT_FILTERS[extname(defaultName)]
+    if (!filter) throw new Error(`Unbekanntes Exportformat: ${defaultName}`)
+    const win = mainWindow()
+    const options = { defaultPath: join(app.getPath('documents'), defaultName), filters: [filter] }
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return null
+    writeFileSync(result.filePath, bytes)
+    return result.filePath
+  })
+  ipcMain.handle('focusWindow', () => {
+    const win = mainWindow()
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
   })
 }
 
@@ -88,7 +127,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    const [win] = BrowserWindow.getAllWindows()
+    const win = mainWindow()
     if (win) {
       if (win.isMinimized()) win.restore()
       win.focus()
@@ -97,7 +136,10 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     // Nur sichern, wenn die Daten lesbar sind, sonst verdrängt ein kaputter Stand die guten Backups.
-    if (load().ok) ensureDailyBackup(store.dataDir)
+    if (load().ok) {
+      ensureDailyBackup(store.dataDir)
+      pruneAttachments(store.dataDir)
+    }
     registerIpc()
     createWindow()
   })

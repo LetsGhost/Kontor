@@ -44,6 +44,27 @@ const migrations: ((dataDir: string) => void)[] = [
         items.map((item) => ({ areaId: DEFAULT_AREA.id, ...item }))
       )
     }
+  },
+  // v3 → v4: Buchungen bekommen Aufteilung und Belege, Regeln Vertragsdaten. Alles startet leer.
+  (dataDir) => {
+    const dir = join(dataDir, TRANSACTIONS_DIR)
+    for (const name of existsSync(dir) ? readdirSync(dir) : []) {
+      if (!YEAR_FILE.test(name)) continue
+      const file = join(dir, name)
+      const items = JSON.parse(readFileSync(file, 'utf8')) as object[]
+      writeJsonAtomic(
+        file,
+        items.map((item) => ({ splits: [], attachments: [], ...item }))
+      )
+    }
+    const recurringFile = join(dataDir, 'recurring.json')
+    if (existsSync(recurringFile)) {
+      const items = JSON.parse(readFileSync(recurringFile, 'utf8')) as object[]
+      writeJsonAtomic(
+        recurringFile,
+        items.map((item) => ({ contract: null, ...item }))
+      )
+    }
   }
 ]
 

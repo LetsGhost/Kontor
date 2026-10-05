@@ -80,7 +80,9 @@ export function bookOccurrence(
     transferAccountId: rule.transferAccountId,
     recurringId: rule.id,
     importHash: null,
-    createdAt
+    createdAt,
+    splits: [],
+    attachments: []
   }
 }
 

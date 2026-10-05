@@ -36,16 +36,21 @@ export function renameWithRetry(from: string, to: string, rename = renameSync, s
 }
 
 /** Schreibt erst in eine temp-Datei und benennt dann um, damit nie eine halbe Datei entsteht. */
-export function writeJsonAtomic(file: string, value: unknown): void {
+export function writeBytesAtomic(file: string, data: string | Uint8Array): void {
   const tmp = `${file}.tmp`
   const fd = openSync(tmp, 'w')
   try {
-    writeSync(fd, JSON.stringify(value, null, 2))
+    if (typeof data === 'string') writeSync(fd, data)
+    else writeSync(fd, data)
     fsyncSync(fd)
   } finally {
     closeSync(fd)
   }
   renameWithRetry(tmp, file)
+}
+
+export function writeJsonAtomic(file: string, value: unknown): void {
+  writeBytesAtomic(file, JSON.stringify(value, null, 2))
 }
 
 /** Liest und validiert eine Datei. Fehlt sie, gilt `fallback`. */

@@ -238,7 +238,7 @@ export function buildCandidates(table: CsvTable, mapping: CsvMapping, options: I
       date,
       amountCents,
       importHash,
-      categoryId: suggestCategory(payee, type, transactions, options.categories, options.today)
+      categoryId: suggestCategory(payee, type, transactions, options.categories, options.today, amountCents)
     }
   })
 }
@@ -289,7 +289,9 @@ export function finishImport(
         transferAccountId: null,
         recurringId: rule?.id ?? null,
         importHash: c.importHash,
-        createdAt
+        createdAt,
+        splits: [],
+        attachments: []
       }
     })
 

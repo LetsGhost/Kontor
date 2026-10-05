@@ -1,5 +1,6 @@
-import { accountBalance } from './balance'
-import type { Account, Budget, Category, Transaction } from './schemas'
+import { balancesOn } from './balance'
+import { categoryParts } from './categories'
+import type { Account, Budget, Category, Split, Transaction } from './schemas'
 import { idsOf, viewOf, type Ids } from './scope'
 
 /** Monate werden durchgehend als "JJJJ-MM" geführt. */
@@ -45,18 +46,18 @@ export interface CategorySpending {
   cents: number
 }
 
-/** Summiert Ausgaben je Hauptkategorie (Unterkategorien eingerechnet), größte zuerst. */
+/** Summiert Ausgaben je Hauptkategorie (Unterkategorien eingerechnet), größte zuerst. Aufteilungen zählen je Teil. */
 export function groupByRootCategory(
-  expenses: Pick<Transaction, 'categoryId' | 'amountCents'>[],
+  expenses: (Pick<Transaction, 'categoryId' | 'amountCents'> & { splits?: Split[] })[],
   categories: Category[]
 ): CategorySpending[] {
   const byId = new Map(categories.map((c) => [c.id, c]))
   const sums = new Map<string | null, number>()
 
-  for (const tx of expenses) {
-    const category = tx.categoryId ? byId.get(tx.categoryId) : undefined
+  for (const part of expenses.flatMap(categoryParts)) {
+    const category = part.categoryId ? byId.get(part.categoryId) : undefined
     const root = category ? (category.parentId ?? category.id) : null
-    sums.set(root, (sums.get(root) ?? 0) + tx.amountCents)
+    sums.set(root, (sums.get(root) ?? 0) + part.amountCents)
   }
 
   return [...sums.entries()]
@@ -98,19 +99,17 @@ export function monthlySeries(
 ): MonthPoint[] {
   const ids = idsOf(accounts)
   const active = accounts.filter((a) => !a.archived)
-  const points: MonthPoint[] = []
-
-  for (let i = count - 1; i >= 0; i--) {
-    const month = addMonths(endMonth, -i)
-    const monthEnd = lastDayOfMonth(month)
-    const onDate = monthEnd < today ? monthEnd : today
-    const balanceCents = active
-      // Vor seinem Startdatum wird ein Konto noch nicht geführt.
-      .filter((a) => a.openingDate <= onDate)
-      .reduce((sum, a) => sum + accountBalance(a, transactions, onDate), 0)
-    points.push({ month, ...monthTotals(transactions, month, ids), balanceCents })
-  }
-  return points
+  const months = Array.from({ length: count }, (_, i) => addMonths(endMonth, i - count + 1))
+  // Vor seinem Startdatum wird ein Konto noch nicht geführt; das berücksichtigt balancesOn.
+  const balances = balancesOn(
+    active,
+    transactions,
+    months.map((month) => {
+      const monthEnd = lastDayOfMonth(month)
+      return monthEnd < today ? monthEnd : today
+    })
+  )
+  return months.map((month, i) => ({ month, ...monthTotals(transactions, month, ids), balanceCents: balances[i] }))
 }
 
 export interface BudgetStatus {
@@ -133,16 +132,18 @@ export function budgetStatus(
   ids: Ids
 ): BudgetStatus[] {
   const byId = new Map(categories.map((c) => [c.id, c]))
-  const expenses = transactions.filter((t) => monthOf(t.date) === month && viewOf(t, ids) === 'expense')
+  const parts = transactions
+    .filter((t) => monthOf(t.date) === month && viewOf(t, ids) === 'expense')
+    .flatMap(categoryParts)
 
   return budgets.flatMap((budget) => {
     const category = byId.get(budget.categoryId)
     if (!category) return []
-    const spentCents = expenses
+    const spentCents = parts
       .filter(
-        (t) => t.categoryId === category.id || (t.categoryId && byId.get(t.categoryId)?.parentId === category.id)
+        (p) => p.categoryId === category.id || (p.categoryId && byId.get(p.categoryId)?.parentId === category.id)
       )
-      .reduce((sum, t) => sum + t.amountCents, 0)
+      .reduce((sum, p) => sum + p.amountCents, 0)
     return [
       {
         categoryId: category.id,

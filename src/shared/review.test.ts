@@ -22,6 +22,8 @@ const tx = (over: Partial<Transaction>): Transaction => ({
   transferAccountId: null,
   recurringId: null,
   importHash: null,
+  splits: [],
+  attachments: [],
   createdAt: '',
   ...over
 })

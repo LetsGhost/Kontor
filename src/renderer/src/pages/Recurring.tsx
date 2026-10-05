@@ -68,7 +68,8 @@ export function Recurring() {
       startDate: pattern.nextDueDate,
       endDate: null,
       nextDueDate: pattern.nextDueDate,
-      active: true
+      active: true,
+      contract: null
     }
     await saveCollection('recurring', (current) => [...current, rule])
     // Die bisherigen Buchungen gehören zur Regel, damit die Prognose sie nicht doppelt zählt.
@@ -267,7 +268,8 @@ function RuleForm({ editing, onClose }: { editing: Rule | null; onClose: () => v
       startDate: date,
       nextDueDate: date,
       endDate: endDate || null,
-      active: editing?.active ?? true
+      active: editing?.active ?? true,
+      contract: editing?.contract ?? null
     }
     await saveCollection(
       'recurring',

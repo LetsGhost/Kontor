@@ -56,13 +56,16 @@ export function CategorySelect({
   value,
   onChange,
   creatable = false,
-  suggestions = []
+  suggestions = [],
+  placeholder = 'Ohne Kategorie'
 }: {
   kind: Category['kind']
   value: string
   onChange: (categoryId: string) => void
   creatable?: boolean
   suggestions?: string[]
+  /** Text im leeren Feld, etwa „Kategorie setzen …“, wenn kein Wert vorbelegt ist */
+  placeholder?: string
 }) {
   const categories = useApp((s) => s.data.categories)
   // Der Name, mit dem das Anlegen startet; null, solange nichts angelegt wird.
@@ -190,7 +193,7 @@ export function CategorySelect({
           aria-activedescendant={open && rows.length > 0 ? optionId(active) : undefined}
           autoComplete="off"
           className={`${inputClass} px-9`}
-          placeholder={selected?.name ?? 'Ohne Kategorie'}
+          placeholder={selected?.name ?? placeholder}
           value={open ? query : (selected?.name ?? '')}
           onChange={(e) => {
             setQuery(e.target.value)

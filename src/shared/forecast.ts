@@ -1,4 +1,4 @@
-import { accountBalance, effectOnAccount } from './balance'
+import { balancesOn, effectOnAccount } from './balance'
 import { bookOccurrence, occurrenceAfter } from './recurring'
 import type { KontorData, Transaction } from './schemas'
 import { viewOf, type Ids } from './scope'
@@ -62,10 +62,6 @@ export function forecast(data: ForecastData, today: string, horizonMonths: numbe
   // Umbuchungen zwischen zwei Konten im Blick heben sich auf, sonst wirken sie wie Zu- oder Abgang.
   const effect = (tx: Transaction): number =>
     scope.reduce((sum, account) => sum + effectOnAccount(tx, account.id), 0)
-  const balanceOn = (date: string): number =>
-    scope
-      .filter((a) => a.openingDate <= date)
-      .reduce((sum, a) => sum + accountBalance(a, data.transactions, date), 0)
 
   // --- Variable Posten: Durchschnitt der letzten abgeschlossenen Monate ---
   const firstMonth = scope.length > 0 ? monthOf(scope.map((a) => a.openingDate).sort()[0]) : currentMonth
@@ -107,7 +103,13 @@ export function forecast(data: ForecastData, today: string, horizonMonths: numbe
     events.reduce((sum, e) => sum + (monthOfEvent(e.date) === month ? e.cents : 0), 0)
 
   // --- Monat für Monat hochrechnen ---
-  const startCents = balanceOn(today)
+  const historyMonths = Array.from({ length: HISTORY_MONTHS }, (_, i) =>
+    addMonths(currentMonth, i - HISTORY_MONTHS)
+  ).filter((month) => month >= firstMonth)
+  const [startCents, ...historyBalances] = balancesOn(scope, data.transactions, [
+    today,
+    ...historyMonths.map(lastDayOfMonth)
+  ])
 
   // Erwartet wird je Monat nur, was vom Durchschnitt noch nicht erfasst ist. Ein Gehalt vom Monatsersten
   // wird so nicht ein zweites Mal erwartet, und eine schon geplante Ausgabe zählt nicht zusätzlich zum
@@ -130,9 +132,7 @@ export function forecast(data: ForecastData, today: string, horizonMonths: numbe
     points.push({ month, fixedCents, variableCents, plannedCents, balanceCents })
   }
 
-  const history = Array.from({ length: HISTORY_MONTHS }, (_, i) => addMonths(currentMonth, i - HISTORY_MONTHS))
-    .filter((month) => month >= firstMonth)
-    .map((month) => ({ month, balanceCents: balanceOn(lastDayOfMonth(month)) }))
+  const history = historyMonths.map((month, i) => ({ month, balanceCents: historyBalances[i] }))
 
   return {
     startCents,

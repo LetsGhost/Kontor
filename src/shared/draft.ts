@@ -1,5 +1,5 @@
 import { parseAmount } from './money'
-import type { Account, Transaction, TransactionType } from './schemas'
+import type { Account, Split, Transaction, TransactionType } from './schemas'
 
 /** Rohzustand des Buchungsformulars: alles Text, so wie es eingegeben wurde. */
 export interface TransactionDraft {
@@ -88,4 +88,39 @@ export function crossesAreas(accounts: Account[], fromId: string, toId: string |
   const from = accounts.find((a) => a.id === fromId)
   const to = accounts.find((a) => a.id === toId)
   return from !== undefined && to !== undefined && from.areaId !== to.areaId
+}
+
+/** Ein Teil einer Aufteilung im Formular, alles noch Text. */
+export interface SplitDraft {
+  categoryId: string
+  amount: string
+  note: string
+}
+
+/** Was von `totalCents` noch nicht auf Teile verteilt ist (negativ: zu viel verteilt). Unlesbare Beträge zählen 0. */
+export function splitRemainder(drafts: SplitDraft[], totalCents: number): number {
+  return drafts.reduce((rest, d) => rest - Math.max(0, parseAmount(d.amount) ?? 0), totalCents)
+}
+
+/** Prüft eine Aufteilung: mindestens zwei Teile, jeder mit Betrag, zusammen genau der Gesamtbetrag. */
+export function checkSplits(
+  drafts: SplitDraft[],
+  totalCents: number
+): { ok: true; splits: Split[] } | { ok: false; error: string } {
+  if (drafts.length < 2) return { ok: false, error: 'Eine Aufteilung braucht mindestens zwei Teile' }
+  const splits: Split[] = []
+  for (const [i, d] of drafts.entries()) {
+    const cents = parseAmount(d.amount)
+    if (cents === null || cents <= 0) return { ok: false, error: `Teil ${i + 1} braucht einen Betrag größer als 0` }
+    splits.push({ categoryId: d.categoryId || null, amountCents: cents, note: d.note.trim() })
+  }
+  const rest = totalCents - splits.reduce((sum, s) => sum + s.amountCents, 0)
+  if (rest !== 0) {
+    const amount = (Math.abs(rest) / 100).toFixed(2).replace('.', ',')
+    return {
+      ok: false,
+      error: rest > 0 ? `Es sind noch ${amount} € nicht verteilt` : `Die Teile ergeben ${amount} € zu viel`
+    }
+  }
+  return { ok: true, splits }
 }

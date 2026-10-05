@@ -37,6 +37,8 @@ const tx = (over: Partial<Transaction>): Transaction => ({
   transferAccountId: null,
   recurringId: null,
   importHash: null,
+  splits: [],
+  attachments: [],
   createdAt: '2026-01-15T00:00:00.000Z',
   ...over
 })

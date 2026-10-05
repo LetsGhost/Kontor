@@ -9,7 +9,12 @@ const api: KontorApi = {
   listBackups: () => ipcRenderer.invoke('listBackups'),
   createBackup: () => ipcRenderer.invoke('createBackup'),
   restoreBackup: (name) => ipcRenderer.invoke('restoreBackup', name),
-  openDataFolder: () => ipcRenderer.invoke('openDataFolder')
+  openDataFolder: () => ipcRenderer.invoke('openDataFolder'),
+  addAttachment: (bytes, type) => ipcRenderer.invoke('addAttachment', bytes, type),
+  readAttachment: (name) => ipcRenderer.invoke('readAttachment', name),
+  openAttachment: (name) => ipcRenderer.invoke('openAttachment', name),
+  saveExport: (defaultName, bytes) => ipcRenderer.invoke('saveExport', defaultName, bytes),
+  focusWindow: () => ipcRenderer.invoke('focusWindow')
 }
 
 contextBridge.exposeInMainWorld('kontor', api)

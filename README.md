@@ -43,7 +43,8 @@ data/
   recurring.json       Wiederkehrende Regeln
   budgets.json         Monatsbudgets je Kategorie
   transactions/2026.json   Buchungen, eine Datei pro Jahr
-  backups/             die letzten 10 Stände als Ordnerkopie
+  attachments/         Belege (Fotos, PDFs), Dateiname = Hash des Inhalts
+  backups/             die letzten 10 Stände als Ordnerkopie (ohne Belege)
 ```
 
 Beträge sind ganze Cent. Die Schemas stehen in `src/shared/schemas.ts`.
@@ -75,6 +76,17 @@ Beträge sind ganze Cent. Die Schemas stehen in `src/shared/schemas.ts`.
   letzten drei abgeschlossenen Monate; Buchungen mit `recurringId` und Umbuchungen zählen nicht in den
   Durchschnitt, im laufenden Monat wird nur der noch nicht gebuchte Rest erwartet
 - Monatsbudget je Kategorie, ohne Übertrag in den Folgemonat
+- Aufteilung: Eine Buchung kann ihren Betrag auf mehrere Kategorien verteilen (`splits`, dann ohne eigene
+  `categoryId`). Auswertungen, Budgets, Vorschläge und Export zählen je Teil (`categoryParts`)
+- Kategorie-Vorschläge berücksichtigen neben Empfänger und Alter auch den Betrag (`amountCloseness`)
+- Belege: Fotos werden vor dem Speichern auf 1600 px und JPEG verkleinert, PDFs bleiben unverändert. Belege
+  ändern sich nie und liegen deshalb nicht in den Backups; gelöscht wird beim Start nur, worauf weder die Daten
+  noch ein Backup zeigen
+- Verträge: Wiederkehrende Posten können Laufzeitende, Verlängerung und Kündigungsfrist tragen (`contract`)
+- Erinnerungen beim Start als Windows-Benachrichtigung, höchstens einmal am Tag, abschaltbar in den Einstellungen
+- Export der gefilterten Buchungen als XLSX (eigener Schreiber in `src/shared/xlsx.ts`, keine Abhängigkeit) oder
+  CSV für deutsches Excel; aufgeteilte Buchungen ergeben eine Zeile je Teil
+- Löschen von Buchungen ohne Rückfrage, dafür mit „Rückgängig“
 - Auswertungen bekommen Diagramme (Recharts), jeweils mit umschaltbarer Tabellenansicht
 - Buchungen in der Zukunft sind erlaubt und zählen erst ab ihrem Datum zum Saldo
 - Oberfläche deutsch, nur dunkles Theme; kein Auto-Update in V1
@@ -93,3 +105,4 @@ Beträge sind ganze Cent. Die Schemas stehen in `src/shared/schemas.ts`.
 6. Prognose ✅
 7. Windows-Installer ✅
 8. CSV-Import ✅
+9. Jahresrückblick, Verträge & Abos, Aufteilung, Belege, Export, Erinnerungen ✅

@@ -50,7 +50,17 @@ export function Section({ title, aside, children }: { title: string; aside?: Rea
   )
 }
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({
+  title,
+  onClose,
+  children,
+  wide = false
+}: {
+  title: string
+  onClose: () => void
+  children: ReactNode
+  wide?: boolean
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose()
@@ -66,7 +76,12 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="w-full max-w-lg rounded-lg border border-line bg-surface p-6">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`w-full rounded-lg border border-line bg-surface p-6 ${wide ? 'max-w-2xl' : 'max-w-lg'}`}
+      >
         <h2 className="mb-5 text-lg font-semibold">{title}</h2>
         {children}
       </div>

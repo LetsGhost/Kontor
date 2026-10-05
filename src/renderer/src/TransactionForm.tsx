@@ -1,7 +1,15 @@
+import { Split, X } from 'lucide-react'
 import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { todayIso } from '../../shared/balance'
-import { checkDraft, type DraftErrors, type TransactionDraft } from '../../shared/draft'
-import { centsToInput, formatCents } from '../../shared/money'
+import {
+  checkDraft,
+  checkSplits,
+  splitRemainder,
+  type DraftErrors,
+  type SplitDraft,
+  type TransactionDraft
+} from '../../shared/draft'
+import { centsToInput, formatCents, parseAmount } from '../../shared/money'
 import type { Transaction, TransactionType } from '../../shared/schemas'
 import {
   frequentCategories,
@@ -12,6 +20,7 @@ import {
 } from '../../shared/suggest'
 import { CategorySelect, TransferCategoryField } from './CategorySelect'
 import { AccountOptions } from './area'
+import { AttachmentField } from './attachments'
 import { useApp } from './store'
 import { Button, Field, Modal, inputClass } from './ui'
 
@@ -41,6 +50,14 @@ export function TransactionForm({
   const [categoryTouched, setCategoryTouched] = useState(editing !== null)
   const [listOpen, setListOpen] = useState(false)
   const [highlight, setHighlight] = useState(-1)
+  // null = nicht aufgeteilt. Eine Aufteilung verteilt den Betrag auf mehrere Kategorien.
+  const [splits, setSplits] = useState<SplitDraft[] | null>(() =>
+    editing && editing.splits.length > 0
+      ? editing.splits.map((s) => ({ categoryId: s.categoryId ?? '', amount: centsToInput(s.amountCents), note: s.note }))
+      : null
+  )
+  const [splitError, setSplitError] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<string[]>(editing?.attachments ?? [])
   const [draft, setDraft] = useState<TransactionDraft>(() =>
     editing
       ? {
@@ -72,6 +89,8 @@ export function TransactionForm({
     (a) => !a.archived || a.id === editing?.accountId || a.id === editing?.transferAccountId
   )
   const isTransfer = draft.type === 'transfer'
+  const amountCents = parseAmount(draft.amount)
+  const knownAmount = amountCents !== null && amountCents > 0 ? amountCents : null
 
   const completions = useMemo(
     () => (listOpen ? payeeCompletions(draft.payee, draft.type, transactions) : []),
@@ -83,19 +102,21 @@ export function TransactionForm({
     const today = todayIso()
     return [
       ...new Set([
-        ...suggestCategories(draft.payee, draft.type, transactions, categories, today),
+        ...suggestCategories(draft.payee, draft.type, transactions, categories, today, 3, knownAmount),
         ...frequentCategories(draft.type, transactions, categories, today)
       ])
     ].slice(0, 3)
-  }, [draft.payee, draft.type, transactions, categories])
+  }, [draft.payee, draft.type, transactions, categories, knownAmount])
 
-  const suggestionFor = (payee: string): string =>
-    suggestCategory(payee, draft.type, transactions, categories, todayIso()) ?? ''
+  // Der Betrag fließt mit ein: Bei Amazon sind 7,99 € eher das Abo, 45 € eher der Haushalt.
+  const suggestionFor = (payee: string, amount: number | null = knownAmount): string =>
+    suggestCategory(payee, draft.type, transactions, categories, todayIso(), amount) ?? ''
 
   const setType = (type: TransactionType): void => {
     // Eine Ausgaben-Kategorie passt nicht zu einer Einnahme und umgekehrt.
     update({ type, categoryId: '' })
     setCategoryTouched(false)
+    setSplits(null)
   }
 
   const changePayee = (payee: string): void => {
@@ -104,11 +125,22 @@ export function TransactionForm({
     setHighlight(-1)
   }
 
+  const changeAmount = (amount: string): void => {
+    if (categoryTouched || splits) {
+      update({ amount })
+      return
+    }
+    const cents = parseAmount(amount)
+    update({ amount, categoryId: suggestionFor(draft.payee, cents !== null && cents > 0 ? cents : null) })
+  }
+
   const accept = (completion: PayeeCompletion): void => {
     update({
       payee: completion.payee,
       amount: draft.amount || centsToInput(completion.amountCents),
-      ...(categoryTouched ? {} : { categoryId: suggestionFor(completion.payee) })
+      ...(categoryTouched
+        ? {}
+        : { categoryId: suggestionFor(completion.payee, knownAmount ?? completion.amountCents) })
     })
     setListOpen(false)
     amountRef.current?.focus()
@@ -131,6 +163,38 @@ export function TransactionForm({
     }
   }
 
+  const startSplit = (): void => {
+    setSplits([
+      { categoryId: draft.categoryId, amount: draft.amount, note: '' },
+      { categoryId: '', amount: '', note: '' }
+    ])
+    setCategoryTouched(true)
+  }
+
+  const updateSplit = (index: number, patch: Partial<SplitDraft>): void => {
+    setSplitError(null)
+    setSplits((list) => list && list.map((s, i) => (i === index ? { ...s, ...patch } : s)))
+  }
+
+  const endSplit = (categoryId: string): void => {
+    update({ categoryId })
+    setSplits(null)
+    setSplitError(null)
+  }
+
+  const removeSplit = (index: number): void => {
+    if (!splits) return
+    const rest = splits.filter((_, i) => i !== index)
+    // Bleibt nur ein Teil übrig, ist die Buchung nicht mehr aufgeteilt; seine Kategorie gilt dann für alles.
+    if (rest.length < 2) endSplit(rest[0]?.categoryId ?? '')
+    else {
+      setSplits(rest)
+      setSplitError(null)
+    }
+  }
+
+  const remainder = splits && knownAmount !== null ? splitRemainder(splits, knownAmount) : 0
+
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault()
     const result = checkDraft(draft, accounts)
@@ -141,6 +205,13 @@ export function TransactionForm({
     setErrors({})
     setSaveError(null)
 
+    const split = splits && !isTransfer ? checkSplits(splits, result.values.amountCents) : null
+    if (split && !split.ok) {
+      setSplitError(split.error)
+      return
+    }
+    setSplitError(null)
+
     try {
       await putTransactions([
         {
@@ -150,7 +221,9 @@ export function TransactionForm({
             importHash: null,
             createdAt: new Date().toISOString()
           }),
-          ...result.values
+          ...result.values,
+          ...(split?.ok ? { categoryId: null, splits: split.splits } : { splits: [] }),
+          attachments
         }
       ])
     } catch (err) {
@@ -165,12 +238,14 @@ export function TransactionForm({
     // Schnellerfassung: Art, Konto und Datum bleiben für die nächste Buchung stehen.
     update({ amount: '', payee: '', note: '', categoryId: '' })
     setCategoryTouched(false)
+    setSplits(null)
+    setAttachments([])
     setSavedCount((n) => n + 1)
     ;(isTransfer ? amountRef : payeeRef).current?.focus()
   }
 
   return (
-    <Modal title={editing ? 'Buchung bearbeiten' : 'Neue Buchung'} onClose={onClose}>
+    <Modal title={editing ? 'Buchung bearbeiten' : 'Neue Buchung'} onClose={onClose} wide={splits !== null}>
       <form className="space-y-4" onSubmit={submit}>
         <div className="grid grid-cols-3 gap-1 rounded-md border border-line p-1">
           {typeLabels.map(([type, label]) => (
@@ -233,7 +308,7 @@ export function TransactionForm({
               inputMode="decimal"
               placeholder="0,00"
               value={draft.amount}
-              onChange={(e) => update({ amount: e.target.value })}
+              onChange={(e) => changeAmount(e.target.value)}
             />
           </Field>
           <Field label="Datum" error={errors.date}>
@@ -246,22 +321,103 @@ export function TransactionForm({
           </Field>
         </div>
 
-        {!isTransfer && (
-          <Field label="Kategorie">
-            <CategorySelect
-              creatable
-              kind={draft.type === 'income' ? 'income' : 'expense'}
-              value={draft.categoryId}
-              suggestions={suggestions}
-              onChange={(categoryId) => {
-                update({ categoryId })
-                setCategoryTouched(true)
-              }}
-            />
-            {!categoryTouched && draft.categoryId !== '' && (
-              <span className="block text-xs text-accent">Vorschlag aus früheren Buchungen</span>
-            )}
-          </Field>
+        {!isTransfer && !splits && (
+          <div className="space-y-1">
+            <Field label="Kategorie">
+              <CategorySelect
+                creatable
+                kind={draft.type === 'income' ? 'income' : 'expense'}
+                value={draft.categoryId}
+                suggestions={suggestions}
+                onChange={(categoryId) => {
+                  update({ categoryId })
+                  setCategoryTouched(true)
+                }}
+              />
+            </Field>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-accent">
+                {!categoryTouched && draft.categoryId !== '' && 'Vorschlag aus früheren Buchungen'}
+              </span>
+              <button
+                type="button"
+                className="flex items-center gap-1 text-xs text-muted hover:text-text"
+                onClick={startSplit}
+              >
+                <Split size={12} /> Auf mehrere Kategorien aufteilen
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isTransfer && splits && (
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between text-xs text-muted">
+              <span>Aufteilung</span>
+              {knownAmount !== null && (
+                <span className={`num ${remainder === 0 ? '' : 'text-warn'}`}>
+                  {remainder === 0
+                    ? 'vollständig verteilt'
+                    : remainder > 0
+                      ? `noch ${formatCents(remainder)} zu verteilen`
+                      : `${formatCents(-remainder)} zu viel`}
+                </span>
+              )}
+            </div>
+            <ul className="space-y-2">
+              {splits.map((part, i) => (
+                <li key={i} className="grid grid-cols-[minmax(0,1fr)_6.5rem_minmax(0,0.8fr)_auto] items-start gap-2">
+                  <CategorySelect
+                    creatable
+                    kind={draft.type === 'income' ? 'income' : 'expense'}
+                    value={part.categoryId}
+                    onChange={(categoryId) => updateSplit(i, { categoryId })}
+                  />
+                  <input
+                    aria-label={`Betrag Teil ${i + 1}`}
+                    className={`${inputClass} num text-right`}
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={part.amount}
+                    onChange={(e) => updateSplit(i, { amount: e.target.value })}
+                    onFocus={() => {
+                      // Ein leerer Teil bekommt beim Betreten den noch offenen Rest vorgeschlagen.
+                      if (part.amount === '' && remainder > 0) updateSplit(i, { amount: centsToInput(remainder) })
+                    }}
+                  />
+                  <input
+                    aria-label={`Notiz Teil ${i + 1}`}
+                    className={inputClass}
+                    placeholder="Notiz"
+                    value={part.note}
+                    onChange={(e) => updateSplit(i, { note: e.target.value })}
+                  />
+                  <Button
+                    variant="ghost"
+                    aria-label={`Teil ${i + 1} entfernen`}
+                    className="mt-0.5"
+                    onClick={() => removeSplit(i)}
+                  >
+                    <X size={14} />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <div className="flex gap-2">
+              <Button
+                small
+                onClick={() =>
+                  setSplits([...splits, { categoryId: '', amount: remainder > 0 ? centsToInput(remainder) : '', note: '' }])
+                }
+              >
+                Teil hinzufügen
+              </Button>
+              <Button small variant="ghost" onClick={() => endSplit(splits[0]?.categoryId ?? '')}>
+                Aufteilung aufheben
+              </Button>
+            </div>
+            {splitError && <p className="text-xs text-danger">{splitError}</p>}
+          </div>
         )}
 
         <div className={isTransfer ? 'grid grid-cols-2 gap-4' : ''}>
@@ -301,6 +457,11 @@ export function TransactionForm({
         <Field label="Notiz">
           <input className={inputClass} value={draft.note} onChange={(e) => update({ note: e.target.value })} />
         </Field>
+
+        <div className="space-y-1">
+          <span className="text-xs text-muted">Belege</span>
+          <AttachmentField value={attachments} onChange={setAttachments} />
+        </div>
 
         {saveError && <p className="text-sm text-danger">Speichern fehlgeschlagen: {saveError}</p>}
 

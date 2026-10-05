@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_AREA, SCHEMA_VERSION, type Account, type Transaction } from '../../shared/schemas'
+import { ATTACHMENTS_DIR, attachmentPath, pruneAttachments, saveAttachment } from './attachments'
 import { MAX_BACKUPS, createBackup, ensureDailyBackup, listBackups, restoreBackup } from './backup'
 import { StorageError, renameWithRetry } from './files'
 import { Store } from './store'
@@ -41,6 +42,8 @@ const tx = (id: string, date: string): Transaction => ({
   transferAccountId: null,
   recurringId: null,
   importHash: null,
+  splits: [],
+  attachments: [],
   createdAt: '2026-01-01T00:00:00.000Z'
 })
 
@@ -81,6 +84,39 @@ describe('Store', () => {
     expect(data.areas).toEqual([DEFAULT_AREA])
     expect(data.accounts).toEqual([giro])
     expect(data.budgets).toEqual([{ areaId: DEFAULT_AREA.id, categoryId: 'cat-wohnen', limitCents: 5000 }])
+  })
+
+  it('migriert Schema 3: Buchungen ohne Aufteilung und Belege, Regeln ohne Vertrag', () => {
+    store.init()
+    const { splits: _s, attachments: _a, ...old } = tx('a', '2026-02-01')
+    writeFileSync(join(dir, 'transactions', '2026.json'), JSON.stringify([old]))
+    writeFileSync(
+      join(dir, 'recurring.json'),
+      JSON.stringify([
+        {
+          id: 'r',
+          accountId: 'giro',
+          type: 'expense',
+          amountCents: 999,
+          payee: 'Abo',
+          note: '',
+          categoryId: null,
+          transferAccountId: null,
+          interval: 'monthly',
+          startDate: '2026-01-01',
+          endDate: null,
+          nextDueDate: '2026-03-01',
+          active: true
+        }
+      ])
+    )
+    writeFileSync(join(dir, 'meta.json'), JSON.stringify({ schemaVersion: 3, createdAt: '' }))
+
+    store.init()
+    const data = store.load()
+    expect(data.transactions[0]).toMatchObject({ splits: [], attachments: [] })
+    expect(data.recurring[0].contract).toBeNull()
+    expect(listBackups(dir).some((b) => b.name.endsWith('vor-migration-v3'))).toBe(true)
   })
 
   it('überschreibt beim zweiten Start keine vorhandenen Daten', () => {
@@ -228,5 +264,53 @@ describe('renameWithRetry', () => {
     const stuck = failing(Array(10).fill('EPERM'))
     expect(() => renameWithRetry('a', 'b', stuck.rename, () => {})).toThrow('EPERM')
     expect(stuck.calls).toHaveLength(6)
+  })
+})
+
+describe('Belege', () => {
+  const bytes = new TextEncoder().encode('%PDF-1.4 Beleg')
+  const old = (name: string): void => {
+    const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+    utimesSync(join(dir, ATTACHMENTS_DIR, name), past, past)
+  }
+
+  it('legt gleichen Inhalt nur einmal ab und prüft Typ und Namen', () => {
+    store.init()
+    const name = saveAttachment(dir, bytes, 'pdf')
+    expect(name).toMatch(/^[a-f0-9]{32}\.pdf$/)
+    expect(saveAttachment(dir, bytes, 'pdf')).toBe(name)
+    expect(readFileSync(attachmentPath(dir, name), 'utf8')).toBe('%PDF-1.4 Beleg')
+    expect(() => saveAttachment(dir, bytes, 'exe')).toThrow(/nicht erlaubt/)
+    expect(() => attachmentPath(dir, '../meta.json')).toThrow(/Ungültiger/)
+  })
+
+  it('sichert Belege nicht mit, löscht sie aber erst, wenn auch kein Backup sie mehr kennt', () => {
+    store.init()
+    const name = saveAttachment(dir, bytes, 'pdf')
+    store.saveTransactions(2026, [{ ...tx('a', '2026-02-01'), attachments: [name] }])
+    const backup = createBackup(dir)!
+    expect(existsSync(join(dir, 'backups', backup, ATTACHMENTS_DIR))).toBe(false)
+
+    // Buchung gelöscht, aber das Backup zeigt noch auf den Beleg.
+    store.saveTransactions(2026, [])
+    old(name)
+    expect(pruneAttachments(dir)).toBe(0)
+
+    rmSync(join(dir, 'backups'), { recursive: true })
+    expect(pruneAttachments(dir)).toBe(1)
+    expect(existsSync(join(dir, ATTACHMENTS_DIR, name))).toBe(false)
+  })
+
+  it('verschont frisch hinzugefügte Belege und übersteht das Zurückspielen eines Backups', () => {
+    store.init()
+    const name = saveAttachment(dir, bytes, 'pdf')
+    expect(pruneAttachments(dir)).toBe(0)
+
+    store.saveTransactions(2026, [{ ...tx('a', '2026-02-01'), attachments: [name] }])
+    const backup = createBackup(dir)!
+    store.saveTransactions(2026, [])
+    restoreBackup(dir, backup)
+    expect(store.load().transactions[0].attachments).toEqual([name])
+    expect(existsSync(join(dir, ATTACHMENTS_DIR, name))).toBe(true)
   })
 })

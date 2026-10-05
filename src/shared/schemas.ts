@@ -2,7 +2,8 @@ import { z } from 'zod'
 
 // v2: Kategorie-Icons sind Namen aus dem Icon-Satz statt Emojis.
 // v3: Bereiche. Konten und Budgets gehören zu einem Bereich und werden nur dort ausgewertet.
-export const SCHEMA_VERSION = 3
+// v4: Aufgeteilte Buchungen, Belege an Buchungen und Vertragsdaten an wiederkehrenden Posten.
+export const SCHEMA_VERSION = 4
 
 export const DEFAULT_AREA = { id: 'area-privat', name: 'Privat' }
 
@@ -69,17 +70,57 @@ const transferIsConsistent = (b: {
 
 const transferMessage = 'Umbuchung braucht ein anderes Zielkonto, andere Buchungen keines'
 
+/** Ein Teil einer aufgeteilten Buchung, etwa der Drogerie-Anteil eines Supermarkt-Einkaufs. */
+export const splitSchema = z.object({
+  categoryId: id.nullable(),
+  amountCents: cents.positive(),
+  note: z.string()
+})
+
+/** Belege liegen unter data/attachments/. Der Name ist ein Hash des Inhalts plus Dateiendung. */
+export const ATTACHMENT_NAME = /^[a-f0-9]{16,64}\.(jpg|png|webp|pdf)$/
+export const attachmentNameSchema = z.string().regex(ATTACHMENT_NAME, 'Ungültiger Belegname')
+
+// Eine aufgeteilte Buchung trägt ihre Kategorien nur in den Teilen. Die Teile ergeben zusammen den Betrag.
+const splitsAreConsistent = (b: {
+  type: string
+  amountCents: number
+  categoryId: string | null
+  splits: { amountCents: number }[]
+}): boolean =>
+  b.splits.length === 0 ||
+  (b.type !== 'transfer' &&
+    b.splits.length >= 2 &&
+    b.categoryId === null &&
+    b.splits.reduce((sum, s) => sum + s.amountCents, 0) === b.amountCents)
+
+const splitMessage = 'Eine Aufteilung braucht mindestens zwei Teile, die zusammen den Betrag ergeben'
+
 export const transactionSchema = z
   .object({
     id,
     date: isoDate,
     ...bookingFields,
     recurringId: id.nullable(),
-    // Für den späteren CSV-Import (Duplikat-Erkennung)
+    // Für den CSV-Import (Duplikat-Erkennung)
     importHash: z.string().nullable(),
-    createdAt: z.string()
+    createdAt: z.string(),
+    splits: z.array(splitSchema),
+    attachments: z.array(attachmentNameSchema)
   })
   .refine(transferIsConsistent, transferMessage)
+  .refine(splitsAreConsistent, splitMessage)
+
+/**
+ * Vertragsdaten zu einem wiederkehrenden Posten. Nach `endDate` verlängert sich der Vertrag um
+ * `renewalMonths` (0 = er endet). Gekündigt werden muss `notice` vor dem jeweiligen Laufzeitende.
+ */
+export const contractSchema = z.object({
+  endDate: isoDate,
+  renewalMonths: z.number().int().min(0),
+  noticeAmount: z.number().int().min(0),
+  noticeUnit: z.enum(['days', 'weeks', 'months'])
+})
 
 export const recurringSchema = z
   .object({
@@ -89,7 +130,8 @@ export const recurringSchema = z
     startDate: isoDate,
     endDate: isoDate.nullable(),
     nextDueDate: isoDate,
-    active: z.boolean()
+    active: z.boolean(),
+    contract: contractSchema.nullable()
   })
   .refine(transferIsConsistent, transferMessage)
 
@@ -118,6 +160,8 @@ export type Transaction = z.infer<typeof transactionSchema>
 export type TransactionType = z.infer<typeof transactionTypeSchema>
 export type Recurring = z.infer<typeof recurringSchema>
 export type Budget = z.infer<typeof budgetSchema>
+export type Split = z.infer<typeof splitSchema>
+export type Contract = z.infer<typeof contractSchema>
 
 export type CollectionName = keyof typeof collectionSchemas
 

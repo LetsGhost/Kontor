@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkDraft, isRealDate, type TransactionDraft } from './draft'
+import { checkDraft, checkSplits, isRealDate, splitRemainder, type TransactionDraft } from './draft'
 import type { Account } from './schemas'
 import { transactionSchema } from './schemas'
 
@@ -49,7 +49,7 @@ describe('checkDraft', () => {
       }
     })
     if (!result.ok) return
-    const tx = { id: 'x', recurringId: null, importHash: null, createdAt: '', ...result.values }
+    const tx = { id: 'x', recurringId: null, importHash: null, createdAt: '', splits: [], attachments: [], ...result.values }
     expect(transactionSchema.safeParse(tx).success).toBe(true)
   })
 
@@ -95,5 +95,27 @@ describe('isRealDate', () => {
     expect(isRealDate('2026-02-30')).toBe(false)
     expect(isRealDate('2026-13-01')).toBe(false)
     expect(isRealDate('26-01-01')).toBe(false)
+  })
+})
+
+describe('checkSplits', () => {
+  const part = (amount: string, categoryId = 'a', note = '') => ({ categoryId, amount, note })
+
+  it('liefert die Teile, wenn sie den Betrag genau ergeben', () => {
+    expect(checkSplits([part('35,00'), part('15', '', ' Drogerie ')], 5000)).toEqual({
+      ok: true,
+      splits: [
+        { categoryId: 'a', amountCents: 3500, note: '' },
+        { categoryId: null, amountCents: 1500, note: 'Drogerie' }
+      ]
+    })
+  })
+
+  it('meldet Rest, Überschuss, leere Teile und zu wenige Teile', () => {
+    expect(checkSplits([part('30'), part('15')], 5000)).toMatchObject({ error: 'Es sind noch 5,00 € nicht verteilt' })
+    expect(checkSplits([part('40'), part('15')], 5000)).toMatchObject({ error: 'Die Teile ergeben 5,00 € zu viel' })
+    expect(checkSplits([part('50'), part('')], 5000)).toMatchObject({ error: 'Teil 2 braucht einen Betrag größer als 0' })
+    expect(checkSplits([part('50')], 5000)).toMatchObject({ ok: false })
+    expect(splitRemainder([part('30'), part('x')], 5000)).toBe(2000)
   })
 })
