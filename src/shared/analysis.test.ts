@@ -4,7 +4,14 @@ import { defaultCategories } from './defaultCategories'
 import type { Account, Transaction } from './schemas'
 import { viewOf } from './scope'
 import { addMonths, budgetStatus, lastDayOfMonth, monthTotals, monthlySeries, spendingByCategory } from './stats'
-import { normalizePayee, payeeCompletions, similarity, suggestCategory } from './suggest'
+import {
+  frequentCategories,
+  normalizePayee,
+  payeeCompletions,
+  similarity,
+  suggestCategories,
+  suggestCategory
+} from './suggest'
 
 const categories = defaultCategories()
 const SUPERMARKT = 'cat-lebensmittel-supermarkt'
@@ -73,6 +80,28 @@ describe('suggestCategory', () => {
   it('trennt Einnahmen von Ausgaben und ignoriert gelöschte Kategorien', () => {
     expect(suggest('rewe', history, 'income')).toBeNull()
     expect(suggest('rewe', [tx({ payee: 'REWE', categoryId: 'gibt-es-nicht' })])).toBeNull()
+  })
+})
+
+describe('Kategorie-Vorschläge als Liste', () => {
+  const history = [
+    tx({ payee: 'Luigi', categoryId: RESTAURANT, date: '2026-06-01' }),
+    tx({ payee: 'Luigi', categoryId: RESTAURANT, date: '2026-06-10' }),
+    tx({ payee: 'Luigi', categoryId: SUPERMARKT, date: '2026-06-05' }),
+    tx({ payee: 'Vermieter', categoryId: MIETE, date: '2023-01-01' }),
+    tx({ payee: 'Arbeitgeber', type: 'income', categoryId: 'gibt-es-nicht' })
+  ]
+
+  it('reiht die Kategorien ähnlicher Buchungen nach Wahrscheinlichkeit', () => {
+    expect(suggestCategories('luigi', 'expense', history, categories, '2026-07-01')).toEqual([RESTAURANT, SUPERMARKT])
+    expect(suggestCategories('luigi', 'expense', history, categories, '2026-07-01', 1)).toEqual([RESTAURANT])
+    expect(suggestCategories('', 'expense', history, categories, '2026-07-01')).toEqual([])
+  })
+
+  it('nennt ohne Empfänger die zuletzt häufig benutzten Kategorien', () => {
+    expect(frequentCategories('expense', history, categories, '2026-07-01')).toEqual([RESTAURANT, SUPERMARKT, MIETE])
+    expect(frequentCategories('income', history, categories, '2026-07-01')).toEqual([])
+    expect(frequentCategories('transfer', history, categories, '2026-07-01')).toEqual([])
   })
 })
 

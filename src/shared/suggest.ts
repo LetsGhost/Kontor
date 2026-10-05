@@ -40,13 +40,57 @@ export function similarity(a: string, b: string): number {
 const MIN_SIMILARITY = 0.6
 const HALF_LIFE_DAYS = 365
 
+// Für „zuletzt oft benutzt“ zählt vor allem das letzte Vierteljahr.
+const FREQUENT_HALF_LIFE_DAYS = 90
+
 const daysBetween = (from: string, to: string): number =>
   (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
 
+const decay = (date: string, today: string, halfLife: number): number =>
+  0.5 ** (Math.max(0, daysBetween(date, today)) / halfLife)
+
+/** Wählbare Kategorien einer Buchungsart, absteigend nach der Summe der Gewichte ihrer Buchungen. */
+function rankCategories(
+  type: TransactionType,
+  transactions: Transaction[],
+  categories: Category[],
+  weightOf: (tx: Transaction) => number
+): string[] {
+  if (type === 'transfer') return []
+  const valid = new Set(categories.filter((c) => c.kind === type && !c.archived).map((c) => c.id))
+  const scores = new Map<string, number>()
+
+  for (const tx of transactions) {
+    if (tx.type !== type || !tx.categoryId || !valid.has(tx.categoryId)) continue
+    const weight = weightOf(tx)
+    if (weight > 0) scores.set(tx.categoryId, (scores.get(tx.categoryId) ?? 0) + weight)
+  }
+
+  return [...scores.entries()].sort(([, a], [, b]) => b - a).map(([id]) => id)
+}
+
 /**
- * Schlägt für einen Empfänger die Kategorie vor, die ähnliche frühere Buchungen am häufigsten hatten.
+ * Kategorien, die ähnliche frühere Buchungen an diesen Empfänger hatten, die wahrscheinlichste zuerst.
  * Neuere Buchungen zählen stärker, damit sich geänderte Gewohnheiten durchsetzen.
  */
+export function suggestCategories(
+  payee: string,
+  type: TransactionType,
+  transactions: Transaction[],
+  categories: Category[],
+  today: string,
+  limit = 3
+): string[] {
+  const target = normalizePayee(payee)
+  if (target.length < 2) return []
+
+  return rankCategories(type, transactions, categories, (tx) => {
+    const sim = similarity(target, normalizePayee(tx.payee))
+    return sim < MIN_SIMILARITY ? 0 : sim * sim * decay(tx.date, today, HALF_LIFE_DAYS)
+  }).slice(0, limit)
+}
+
+/** Der beste Vorschlag für einen Empfänger, oder null, wenn nichts Ähnliches bekannt ist. */
 export function suggestCategory(
   payee: string,
   type: TransactionType,
@@ -54,28 +98,20 @@ export function suggestCategory(
   categories: Category[],
   today: string
 ): string | null {
-  const target = normalizePayee(payee)
-  if (target.length < 2 || type === 'transfer') return null
+  return suggestCategories(payee, type, transactions, categories, today, 1)[0] ?? null
+}
 
-  const kind = type === 'income' ? 'income' : 'expense'
-  const valid = new Set(categories.filter((c) => c.kind === kind && !c.archived).map((c) => c.id))
-  const scores = new Map<string, number>()
-
-  for (const tx of transactions) {
-    if (tx.type !== type || !tx.categoryId || !valid.has(tx.categoryId)) continue
-    const sim = similarity(target, normalizePayee(tx.payee))
-    if (sim < MIN_SIMILARITY) continue
-    const age = Math.max(0, daysBetween(tx.date, today))
-    const weight = sim * sim * 0.5 ** (age / HALF_LIFE_DAYS)
-    scores.set(tx.categoryId, (scores.get(tx.categoryId) ?? 0) + weight)
-  }
-
-  let best: string | null = null
-  let bestScore = 0
-  for (const [id, score] of scores) {
-    if (score > bestScore) [best, bestScore] = [id, score]
-  }
-  return best
+/** Die in letzter Zeit am häufigsten benutzten Kategorien, unabhängig vom Empfänger. */
+export function frequentCategories(
+  type: TransactionType,
+  transactions: Transaction[],
+  categories: Category[],
+  today: string,
+  limit = 3
+): string[] {
+  return rankCategories(type, transactions, categories, (tx) =>
+    decay(tx.date, today, FREQUENT_HALF_LIFE_DAYS)
+  ).slice(0, limit)
 }
 
 export interface PayeeCompletion {

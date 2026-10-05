@@ -3,7 +3,13 @@ import { todayIso } from '../../shared/balance'
 import { checkDraft, type DraftErrors, type TransactionDraft } from '../../shared/draft'
 import { centsToInput, formatCents } from '../../shared/money'
 import type { Transaction, TransactionType } from '../../shared/schemas'
-import { payeeCompletions, suggestCategory, type PayeeCompletion } from '../../shared/suggest'
+import {
+  frequentCategories,
+  payeeCompletions,
+  suggestCategories,
+  suggestCategory,
+  type PayeeCompletion
+} from '../../shared/suggest'
 import { CategorySelect, TransferCategoryField } from './CategorySelect'
 import { AccountOptions } from './area'
 import { useApp } from './store'
@@ -71,6 +77,17 @@ export function TransactionForm({
     () => (listOpen ? payeeCompletions(draft.payee, draft.type, transactions) : []),
     [listOpen, draft.payee, draft.type, transactions]
   )
+
+  // Schnellwahl unter dem Kategorie-Feld: erst was zum Empfänger passt, dann was zuletzt oft benutzt wurde.
+  const suggestions = useMemo(() => {
+    const today = todayIso()
+    return [
+      ...new Set([
+        ...suggestCategories(draft.payee, draft.type, transactions, categories, today),
+        ...frequentCategories(draft.type, transactions, categories, today)
+      ])
+    ].slice(0, 3)
+  }, [draft.payee, draft.type, transactions, categories])
 
   const suggestionFor = (payee: string): string =>
     suggestCategory(payee, draft.type, transactions, categories, todayIso()) ?? ''
@@ -235,6 +252,7 @@ export function TransactionForm({
               creatable
               kind={draft.type === 'income' ? 'income' : 'expense'}
               value={draft.categoryId}
+              suggestions={suggestions}
               onChange={(categoryId) => {
                 update({ categoryId })
                 setCategoryTouched(true)

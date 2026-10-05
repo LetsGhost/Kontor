@@ -51,6 +51,8 @@ export function Recurring() {
   // Eine Umbuchung in einen anderen Bereich zählt hier wie eine Ausgabe, eine von dort wie eine Einnahme.
   const monthlySum = (view: 'expense' | 'income'): number =>
     rules.filter((r) => r.active && viewOf(r, area.ids) === view).reduce((sum, r) => sum + monthlyCents(r), 0)
+  // Was von den festen Einnahmen nach Abzug der festen Ausgaben übrig bleibt.
+  const available = monthlySum('income') - monthlySum('expense')
 
   const accept = async (pattern: DetectedPattern): Promise<void> => {
     const rule: Rule = {
@@ -107,6 +109,10 @@ export function Recurring() {
           <div>
             <dt className="text-xs text-muted">Feste Einnahmen pro Monat</dt>
             <dd className="num mt-0.5 text-xl">{formatCents(monthlySum('income'))}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted">Verfügbar pro Monat</dt>
+            <dd className={`num mt-0.5 text-xl ${available < 0 ? 'text-danger' : ''}`}>{formatCents(available)}</dd>
           </div>
         </dl>
       )}

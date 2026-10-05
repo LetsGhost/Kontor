@@ -1,4 +1,5 @@
 import {
+  CalendarCheck,
   ChartColumn,
   FolderOpen,
   Landmark,
@@ -18,14 +19,16 @@ import { Categories } from './pages/Categories'
 import { Forecast } from './pages/Forecast'
 import { Overview } from './pages/Overview'
 import { Recurring } from './pages/Recurring'
+import { Review } from './pages/Review'
 import { Transactions } from './pages/Transactions'
 import { useApp } from './store'
 import { Button, Section } from './ui'
 
-type Page = 'overview' | 'forecast' |'transactions' | 'recurring' | 'accounts' | 'categories' | 'settings'
+type Page = 'overview' | 'review' | 'forecast' | 'transactions' | 'recurring' | 'accounts' | 'categories' | 'settings'
 
 const pages: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: 'Übersicht', icon: ChartColumn },
+  { id: 'review', label: 'Rückblick', icon: CalendarCheck },
   { id: 'forecast', label: 'Prognose', icon: TrendingUp },
   { id: 'transactions', label: 'Buchungen', icon: ScrollText },
   { id: 'recurring', label: 'Wiederkehrend', icon: Repeat },
@@ -110,6 +113,7 @@ export function App() {
         {/* Auf sehr breiten Fenstern bleibt der Inhalt eine mittige Spalte; die Seiten füllen sie von links. */}
         <div className="mx-auto max-w-7xl">
           {page === 'overview' && <Overview />}
+          {page === 'review' && <Review />}
           {page === 'forecast' && <Forecast />}
           {page === 'transactions' && <Transactions onGoToAccounts={() => setPage('accounts')} />}
           {page === 'recurring' && <Recurring />}
