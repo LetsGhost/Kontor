@@ -1,7 +1,7 @@
 {
   "name": "kontor",
   "productName": "Kontor",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Persönliche Finanzverwaltung",
   "author": "Kontor",
   "private": true,
