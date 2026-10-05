@@ -70,26 +70,20 @@ export function Recurring() {
       nextDueDate: pattern.nextDueDate,
       active: true
     }
-    await saveCollection('recurring', [...recurring, rule])
+    await saveCollection('recurring', (current) => [...current, rule])
     // Die bisherigen Buchungen gehören zur Regel, damit die Prognose sie nicht doppelt zählt.
     const ids = new Set(pattern.transactionIds)
     await putTransactions(transactions.filter((t) => ids.has(t.id)).map((t) => ({ ...t, recurringId: rule.id })))
   }
 
   const remove = async (id: string): Promise<void> => {
-    await saveCollection(
-      'recurring',
-      recurring.filter((r) => r.id !== id)
-    )
+    await saveCollection('recurring', (current) => current.filter((r) => r.id !== id))
     await putTransactions(transactions.filter((t) => t.recurringId === id).map((t) => ({ ...t, recurringId: null })))
     setConfirmDelete(null)
   }
 
   const setActive = (rule: Rule, active: boolean): Promise<void> =>
-    saveCollection(
-      'recurring',
-      recurring.map((r) => (r.id === rule.id ? { ...r, active } : r))
-    )
+    saveCollection('recurring', (current) => current.map((r) => (r.id === rule.id ? { ...r, active } : r)))
 
   return (
     <div className="max-w-4xl space-y-8">
@@ -143,7 +137,7 @@ export function Recurring() {
                 <Button
                   small
                   variant="ghost"
-                  onClick={() => saveCollection('dismissedPatterns', [...dismissedPatterns, p.key])}
+                  onClick={() => saveCollection('dismissedPatterns', (current) => [...current, p.key])}
                 >
                   Ignorieren
                 </Button>

@@ -13,7 +13,7 @@ export interface ForecastPoint {
   month: string
   /** Wiederkehrende Posten in diesem Monat, mit Vorzeichen */
   fixedCents: number
-  /** Geschätzte variable Einnahmen minus Ausgaben; im laufenden Monat nur der noch nicht gebuchte Rest */
+  /** Geschätzte variable Einnahmen minus Ausgaben, abzüglich dessen, was in dem Monat schon erfasst ist */
   variableCents: number
   /** Bereits erfasste Buchungen mit Datum in der Zukunft */
   plannedCents: number
@@ -108,15 +108,16 @@ export function forecast(data: ForecastData, today: string, horizonMonths: numbe
 
   // --- Monat für Monat hochrechnen ---
   const startCents = balanceOn(today)
-  const variableNet = variableIncomeCents - variableExpenseCents
 
-  // Im laufenden Monat bleibt nur übrig, was vom Durchschnitt noch nicht gebucht ist. Ein Gehalt vom
-  // Monatsersten wird so nicht ein zweites Mal erwartet.
-  const thisMonth = variable.filter((tx) => monthOf(tx.date) === currentMonth && tx.date <= today)
-  const incomeSoFar = sum(thisMonth.filter((tx) => viewOf(tx, ids) === 'income'))
-  const expenseSoFar = sum(thisMonth.filter((tx) => viewOf(tx, ids) === 'expense'))
-  const restOfMonth =
-    Math.max(0, variableIncomeCents - incomeSoFar) - Math.max(0, variableExpenseCents - expenseSoFar)
+  // Erwartet wird je Monat nur, was vom Durchschnitt noch nicht erfasst ist. Ein Gehalt vom Monatsersten
+  // wird so nicht ein zweites Mal erwartet, und eine schon geplante Ausgabe zählt nicht zusätzlich zum
+  // Durchschnitt (sie steckt bereits in plannedCents).
+  const variableRest = (month: string): number => {
+    const booked = variable.filter((tx) => monthOf(tx.date) === month)
+    const incomeSoFar = sum(booked.filter((tx) => viewOf(tx, ids) === 'income'))
+    const expenseSoFar = sum(booked.filter((tx) => viewOf(tx, ids) === 'expense'))
+    return Math.max(0, variableIncomeCents - incomeSoFar) - Math.max(0, variableExpenseCents - expenseSoFar)
+  }
 
   const points: ForecastPoint[] = []
   let balanceCents = startCents
@@ -124,7 +125,7 @@ export function forecast(data: ForecastData, today: string, horizonMonths: numbe
     const month = addMonths(currentMonth, k)
     const fixedCents = sumIn(fixed, month)
     const plannedCents = sumIn(planned, month)
-    const variableCents = k === 0 ? restOfMonth : variableNet
+    const variableCents = variableRest(month)
     balanceCents += fixedCents + plannedCents + variableCents
     points.push({ month, fixedCents, variableCents, plannedCents, balanceCents })
   }

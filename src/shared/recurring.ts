@@ -114,10 +114,21 @@ const GAP_RANGES: [Interval, number, number][] = [
 ]
 const MIN_OCCURRENCES = 3
 const AMOUNT_TOLERANCE = 0.1
+// So viele Termine dürfen zwischen zwei Buchungen fehlen, etwa bei einem pausierten Abo.
+const MAX_SKIPPED = 2
 
+/** Bei gerader Anzahl der untere der beiden mittleren Werte. */
 const median = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b)
-  return sorted[Math.floor(sorted.length / 2)]
+  return sorted[Math.floor((sorted.length - 1) / 2)]
+}
+
+/** Passt der Abstand zum Rhythmus, auch wenn bis zu MAX_SKIPPED Termine dazwischen ausgefallen sind? */
+const fitsRhythm = (gap: number, min: number, max: number): boolean => {
+  for (let steps = 1; steps <= MAX_SKIPPED + 1; steps++) {
+    if (gap >= min * steps && gap <= max * steps) return true
+  }
+  return false
 }
 
 /**
@@ -148,10 +159,13 @@ export function detectPatterns(
     if (group.length < MIN_OCCURRENCES) continue
     group.sort((a, b) => a.date.localeCompare(b.date))
 
+    // Der typische Abstand bestimmt den Rhythmus, die übrigen dürfen ein Vielfaches davon sein.
     const gaps = group.slice(1).map((tx, i) => daysBetween(group[i].date, tx.date))
-    const range = GAP_RANGES.find(([, min, max]) => gaps.every((gap) => gap >= min && gap <= max))
+    const typicalGap = median(gaps)
+    const range = GAP_RANGES.find(([, min, max]) => typicalGap >= min && typicalGap <= max)
     if (!range) continue
-    const [interval, , maxGap] = range
+    const [interval, minGap, maxGap] = range
+    if (!gaps.every((gap) => fitsRhythm(gap, minGap, maxGap))) continue
 
     const typical = median(group.map((tx) => tx.amountCents))
     if (group.some((tx) => Math.abs(tx.amountCents - typical) > typical * AMOUNT_TOLERANCE)) continue

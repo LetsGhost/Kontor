@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_AREA, SCHEMA_VERSION, type Account, type Transaction } from '../../shared/schemas'
 import { MAX_BACKUPS, createBackup, ensureDailyBackup, listBackups, restoreBackup } from './backup'
-import { StorageError } from './files'
+import { StorageError, renameWithRetry } from './files'
 import { Store } from './store'
 
 let dir: string
@@ -203,5 +203,30 @@ describe('Backups', () => {
     store.init()
     createBackup(dir, { now: at(1) })
     expect(() => restoreBackup(dir, '..')).toThrow(/nicht gefunden/)
+  })
+})
+
+describe('renameWithRetry', () => {
+  const failing = (codes: string[]) => {
+    const calls: string[] = []
+    const rename = (): void => {
+      const code = codes[calls.length]
+      calls.push(code ?? 'ok')
+      if (code) throw Object.assign(new Error(code), { code })
+    }
+    return { calls, rename }
+  }
+
+  it('versucht es erneut, solange Windows die Datei kurz sperrt', () => {
+    const { calls, rename } = failing(['EPERM', 'EBUSY'])
+    renameWithRetry('a', 'b', rename, () => {})
+    expect(calls).toEqual(['EPERM', 'EBUSY', 'ok'])
+  })
+
+  it('gibt bei anderen Fehlern und nach dem letzten Versuch auf', () => {
+    expect(() => renameWithRetry('a', 'b', failing(['ENOENT']).rename, () => {})).toThrow('ENOENT')
+    const stuck = failing(Array(10).fill('EPERM'))
+    expect(() => renameWithRetry('a', 'b', stuck.rename, () => {})).toThrow('EPERM')
+    expect(stuck.calls).toHaveLength(6)
   })
 })

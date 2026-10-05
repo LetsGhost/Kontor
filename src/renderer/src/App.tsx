@@ -112,6 +112,7 @@ export function App() {
       <main className="min-w-0 flex-1 overflow-y-auto px-5 py-6 [scrollbar-gutter:stable] md:px-8 xl:px-10 xl:py-8">
         {/* Auf sehr breiten Fenstern bleibt der Inhalt eine mittige Spalte; die Seiten füllen sie von links. */}
         <div className="mx-auto max-w-7xl">
+          <SaveError />
           {page === 'overview' && <Overview />}
           {page === 'review' && <Review />}
           {page === 'forecast' && <Forecast />}
@@ -122,6 +123,26 @@ export function App() {
           {page === 'settings' && <Settings />}
         </div>
       </main>
+    </div>
+  )
+}
+
+/** Gescheitertes Speichern bleibt sichtbar, bis es weggeklickt wird. Die Daten auf der Platte sind unverändert. */
+function SaveError() {
+  const message = useApp((s) => s.saveError)
+  const dismiss = useApp((s) => s.dismissSaveError)
+  if (!message) return null
+
+  return (
+    <div role="alert" className="mb-6 flex items-start justify-between gap-4 border-y border-danger py-2.5 text-sm">
+      <div className="min-w-0">
+        <div className="font-medium text-danger">Speichern fehlgeschlagen</div>
+        {/* Electron stellt Fehlern aus dem Hauptprozess den IPC-Aufruf voran, der hilft hier niemandem. */}
+        <div className="text-muted">{message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}</div>
+      </div>
+      <Button small variant="ghost" className="shrink-0" onClick={dismiss}>
+        Schließen
+      </Button>
     </div>
   )
 }

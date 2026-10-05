@@ -13,6 +13,28 @@ export class StorageError extends Error {
   }
 }
 
+// Virenscanner, Indexdienst und OneDrive halten frisch geschriebene Dateien unter Windows kurz offen.
+// Das Umbenennen scheitert dann mit einem dieser Codes und klappt einen Moment später.
+const TRANSIENT_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+const RENAME_DELAYS_MS = [20, 50, 100, 200, 400]
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+export function renameWithRetry(from: string, to: string, rename = renameSync, sleep = sleepSync): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(from, to)
+      return
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (attempt >= RENAME_DELAYS_MS.length || !code || !TRANSIENT_CODES.has(code)) throw err
+      sleep(RENAME_DELAYS_MS[attempt])
+    }
+  }
+}
+
 /** Schreibt erst in eine temp-Datei und benennt dann um, damit nie eine halbe Datei entsteht. */
 export function writeJsonAtomic(file: string, value: unknown): void {
   const tmp = `${file}.tmp`
@@ -23,7 +45,7 @@ export function writeJsonAtomic(file: string, value: unknown): void {
   } finally {
     closeSync(fd)
   }
-  renameSync(tmp, file)
+  renameWithRetry(tmp, file)
 }
 
 /** Liest und validiert eine Datei. Fehlt sie, gilt `fallback`. */

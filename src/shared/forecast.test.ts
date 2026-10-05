@@ -124,6 +124,23 @@ describe('forecast', () => {
     expect(result.points.map((p) => p.variableCents)).toEqual([-60000, 160000])
   })
 
+  it('zählt geplante variable Buchungen nicht zusätzlich zum Durchschnitt', () => {
+    const transactions = [
+      tx('2026-03-10', 30000),
+      tx('2026-04-10', 30000),
+      tx('2026-05-10', 30000),
+      // Schon erfasst: später im Juni und im Juli
+      tx('2026-06-20', 10000),
+      tx('2026-07-15', 50000)
+    ]
+    const result = forecast(data({ transactions }), TODAY, 2, ALL)
+    expect(result.points.map((p) => p.plannedCents)).toEqual([-10000, -50000, 0])
+    // Juni: von 300 € sind 100 € geplant, es fehlen 200 €. Juli: 500 € geplant, über dem Durchschnitt.
+    // Start: 1.000 € minus 900 € aus März bis Mai.
+    expect(result.points.map((p) => p.variableCents)).toEqual([-20000, 0, -30000])
+    expect(result.points.map((p) => p.balanceCents)).toEqual([-20000, -70000, -100000])
+  })
+
   it('teilt bei kurzer Historie nur durch die vorhandenen Monate', () => {
     const accounts = [account('giro', 0, { openingDate: '2026-05-01' })]
     const result = forecast(data({ accounts, transactions: [tx('2026-05-10', 30000)] }), TODAY, 1, ALL)

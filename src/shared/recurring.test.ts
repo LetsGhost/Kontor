@@ -122,6 +122,22 @@ describe('detectPatterns', () => {
     expect(detect([tx('2026-03-05'), tx('2026-04-05', { amountCents: 4000 }), tx('2026-05-05')])).toEqual([])
   })
 
+  it('erkennt den Rhythmus auch, wenn einzelne Termine ausgefallen sind', () => {
+    const [pattern] = detect([tx('2026-01-05'), tx('2026-02-05'), tx('2026-04-06'), tx('2026-05-05')])
+    expect(pattern).toMatchObject({ interval: 'monthly', nextDueDate: '2026-06-05' })
+    expect(pattern.transactionIds).toHaveLength(4)
+  })
+
+  it('verwechselt monatliche Abstände nicht mit einem Vielfachen von Wochen', () => {
+    const [pattern] = detect([tx('2026-02-05'), tx('2026-03-05'), tx('2026-04-05'), tx('2026-05-05')])
+    expect(pattern.interval).toBe('monthly')
+    expect(detect([tx('2026-04-15'), tx('2026-04-22'), tx('2026-05-06'), tx('2026-05-13')])[0].interval).toBe('weekly')
+  })
+
+  it('verlangt, dass der übliche Abstand zum Rhythmus passt', () => {
+    expect(detect([tx('2026-01-05'), tx('2026-03-05'), tx('2026-05-05')])).toEqual([])
+  })
+
   it('akzeptiert Beträge, die bis zu zehn Prozent schwanken', () => {
     const strom = [7000, 7400, 6800].map((amountCents, i) =>
       tx(`2026-0${i + 3}-03`, { payee: 'Stadtwerke', amountCents })

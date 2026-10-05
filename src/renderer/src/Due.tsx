@@ -40,30 +40,43 @@ export function DueList({ items }: { items: DueItem[] }) {
 }
 
 function DueRow({ rule, date, further }: DueItem) {
-  const { accounts, recurring } = useApp((s) => s.data)
+  const accounts = useApp((s) => s.data.accounts)
   const putTransactions = useApp((s) => s.putTransactions)
   const saveCollection = useApp((s) => s.saveCollection)
   const [amount, setAmount] = useState(centsToInput(rule.amountCents))
   const [invalid, setInvalid] = useState(false)
+  // Ein Doppelklick auf „Buchen“ darf den Termin nicht zweimal buchen.
+  const [busy, setBusy] = useState(false)
 
   const name = (id: string | null): string => accounts.find((a) => a.id === id)?.name ?? '?'
   const title = rule.type === 'transfer' ? `${name(rule.accountId)} → ${name(rule.transferAccountId)}` : rule.payee
 
-  const moveOn = (): Promise<void> =>
-    saveCollection(
-      'recurring',
-      recurring.map((r) => (r.id === rule.id ? advance(r, date) : r))
-    )
+  // Die Regel aus dem Stand beim Schreiben weiterschalten, nicht aus dem beim Klick.
+  const advanceRule = (): Promise<void> =>
+    saveCollection('recurring', (current) => current.map((r) => (r.id === rule.id ? advance(r, date) : r)))
 
-  const book = async (): Promise<void> => {
-    const amountCents = parseAmount(amount)
-    if (amountCents === null || amountCents <= 0) {
-      setInvalid(true)
-      return
+  const whileBusy = async (task: () => Promise<void>): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await task()
+    } finally {
+      setBusy(false)
     }
-    await putTransactions([bookOccurrence(rule, date, amountCents, crypto.randomUUID(), new Date().toISOString())])
-    await moveOn()
   }
+
+  const book = (): Promise<void> =>
+    whileBusy(async () => {
+      const amountCents = parseAmount(amount)
+      if (amountCents === null || amountCents <= 0) {
+        setInvalid(true)
+        return
+      }
+      await putTransactions([bookOccurrence(rule, date, amountCents, crypto.randomUUID(), new Date().toISOString())])
+      await advanceRule()
+    })
+
+  const skip = (): Promise<void> => whileBusy(advanceRule)
 
   return (
     <li className="flex items-center gap-4 py-2.5 text-sm">
@@ -91,10 +104,10 @@ function DueRow({ rule, date, further }: DueItem) {
         }}
       />
       <span className="text-muted">€</span>
-      <Button small variant="primary" onClick={book}>
+      <Button small variant="primary" disabled={busy} onClick={book}>
         Buchen
       </Button>
-      <Button small variant="ghost" onClick={moveOn}>
+      <Button small variant="ghost" disabled={busy} onClick={skip}>
         Überspringen
       </Button>
     </li>
