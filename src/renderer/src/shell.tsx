@@ -113,17 +113,21 @@ function notify(items: Reminder[], setPage: (page: Page) => void): void {
   }
 }
 
-/** Zeigt beim Start Windows-Benachrichtigungen, höchstens einmal am Tag. */
+/**
+ * Zeigt beim Start Windows-Benachrichtigungen, höchstens einmal am Tag. Ein Hintergrundstart mit Windows
+ * erfährt danach, ob er sich gleich beenden kann.
+ */
 export function useStartupReminders(ready: boolean): void {
   const setPage = useApp((s) => s.setPage)
 
   useEffect(() => {
-    if (!ready || !remindersEnabled()) return
+    if (!ready) return
     const today = todayIso()
-    if (readSetting(REMINDED_ON_KEY) === today) return
-    const items = reminders(useApp.getState().data, today)
-    writeSetting(REMINDED_ON_KEY, today)
+    const due = remindersEnabled() && readSetting(REMINDED_ON_KEY) !== today
+    const items = due ? reminders(useApp.getState().data, today) : []
+    if (due) writeSetting(REMINDED_ON_KEY, today)
     notify(items, setPage)
+    if (useApp.getState().info?.background) void window.kontor.backgroundDone(items.length)
     // Nur einmal nach dem Laden, nicht nach jeder Änderung der Daten.
   }, [ready, setPage])
 }
@@ -146,7 +150,7 @@ export function ReminderSettings() {
   }
 
   return (
-    <div className="space-y-3 text-sm">
+    <div className="space-y-4 text-sm">
       <label className="flex items-start gap-3">
         <input
           type="checkbox"
@@ -162,6 +166,7 @@ export function ReminderSettings() {
           </span>
         </span>
       </label>
+      <AutostartSetting />
       <div className="flex items-center gap-3">
         <Button small onClick={showNow}>
           Jetzt anzeigen
@@ -169,5 +174,47 @@ export function ReminderSettings() {
         {result && <span className="text-xs text-muted">{result}</span>}
       </div>
     </div>
+  )
+}
+
+/** „Mit Windows starten“: Kontor prüft beim Anmelden still auf Erinnerungen, ohne ein Fenster zu öffnen. */
+function AutostartSetting() {
+  const [state, setState] = useState<{ available: boolean; enabled: boolean } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.kontor.getAutostart().then(setState, () => setState({ available: false, enabled: false }))
+  }, [])
+
+  if (!state) return null
+
+  const toggle = async (on: boolean): Promise<void> => {
+    setError(null)
+    try {
+      setState({ ...state, enabled: await window.kontor.setAutostart(on) })
+    } catch (err) {
+      setError((err as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    }
+  }
+
+  return (
+    <label className={`flex items-start gap-3 ${state.available ? '' : 'text-muted'}`}>
+      <input
+        type="checkbox"
+        className="mt-0.5 accent-[var(--color-accent)]"
+        disabled={!state.available}
+        checked={state.enabled}
+        onChange={(e) => void toggle(e.target.checked)}
+      />
+      <span>
+        Mit Windows starten
+        <span className="block text-xs text-muted">
+          {state.available
+            ? 'Beim Anmelden prüft Kontor ohne Fenster, ob es etwas zu erinnern gibt. Gibt es nichts, beendet es sich sofort. Sonst lässt sich die Benachrichtigung zehn Minuten lang anklicken, um Kontor zu öffnen.'
+            : 'Nur in der installierten App verfügbar, nicht im Entwicklungsmodus.'}
+        </span>
+        {error && <span className="block text-xs text-danger">{error}</span>}
+      </span>
+    </label>
   )
 }

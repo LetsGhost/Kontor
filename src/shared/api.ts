@@ -4,6 +4,14 @@ export interface AppInfo {
   isDev: boolean
   dataDir: string
   version: string
+  /** Mit Windows gestartet und noch unsichtbar: nur Erinnerungen prüfen */
+  background: boolean
+}
+
+export interface AutostartState {
+  /** Nur die installierte App kann sich eintragen, nicht der Entwicklungsmodus */
+  available: boolean
+  enabled: boolean
 }
 
 export interface BackupInfo {
@@ -33,4 +41,9 @@ export interface KontorApi {
   saveExport(defaultName: string, bytes: Uint8Array): Promise<string | null>
   /** Holt das Fenster nach vorn, etwa nach einem Klick auf eine Benachrichtigung. */
   focusWindow(): Promise<void>
+  /** Meldet dem Hintergrundstart, wie viele Erinnerungen gezeigt wurden (0 = gleich beenden). */
+  backgroundDone(notified: number): Promise<void>
+  getAutostart(): Promise<AutostartState>
+  /** Gibt zurück, ob der Autostart danach tatsächlich eingetragen ist. */
+  setAutostart(enabled: boolean): Promise<boolean>
 }

@@ -2,9 +2,10 @@ import { BellRing } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { todayIso } from '../../../shared/balance'
 import {
-  cancelDeadline,
   describeDeadline,
+  explainContract,
   formatNotice,
+  noticeLongerThanAMonth,
   noticeUnitLabel,
   subscriptions,
   upcomingDeadlines,
@@ -220,15 +221,15 @@ function ContractForm({ rule, onClose }: { rule: Recurring; onClose: () => void 
 
         <p className="text-xs text-muted">
           {draft
-            ? draft.renewalMonths === 0
-              ? `Der Vertrag endet am ${formatDate(draft.endDate)} ohne Verlängerung.`
-              : `Um zum ${formatDate(draft.endDate)} zu kündigen, muss die Kündigung bis ${formatDate(
-                  cancelDeadline(draft, draft.endDate)
-                )} da sein. Danach verlängert er sich jeweils um ${draft.renewalMonths} ${
-                  draft.renewalMonths === 1 ? 'Monat' : 'Monate'
-                }. Seit 2022 sind viele Verbraucherverträge nach der Mindestlaufzeit monatlich kündbar: dann 1 Monat Verlängerung und 1 Monat Frist.`
+            ? explainContract(draft, todayIso())
             : 'Kontor erinnert dich beim Start, wenn eine Kündigungsfrist in den nächsten 30 Tagen abläuft.'}
         </p>
+        {draft && draft.renewalMonths > 0 && noticeLongerThanAMonth(draft) && (
+          <p className="text-xs text-warn">
+            Hinweis: Bei Verbraucherverträgen, die seit März 2022 geschlossen wurden, darf die Kündigungsfrist nach der
+            Mindestlaufzeit meist höchstens einen Monat betragen. Prüfe, ob die angegebene Frist noch gilt.
+          </p>
+        )}
 
         <div className="flex items-center justify-between gap-2">
           <div>

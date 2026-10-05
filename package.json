@@ -32,6 +32,7 @@
       "oneClick": true,
       "perMachine": false,
       "deleteAppDataOnUninstall": false,
+      "include": "installer/uninstall.nsh",
       "artifactName": "Kontor-Setup-${version}.${ext}"
     }
   },

@@ -101,3 +101,34 @@ export const describeDeadline = (d: Deadline): string =>
   d.daysLeft === 0
     ? `Heute letzter Tag zum Kündigen (verlängert sich zum ${formatDate(d.termEnd)})`
     : `Kündigen bis ${formatDate(d.cancelBy)}, noch ${d.daysLeft} ${d.daysLeft === 1 ? 'Tag' : 'Tage'}`
+
+const months = (n: number): string => `${n} ${n === 1 ? 'Monat' : 'Monate'}`
+
+/** Ob die Frist länger als ein Monat ist. Bei Verbraucherverträgen ab März 2022 ist das nach der Mindestlaufzeit meist unzulässig. */
+export const noticeLongerThanAMonth = (c: Pick<Contract, 'noticeAmount' | 'noticeUnit'>): boolean =>
+  c.noticeUnit === 'months' ? c.noticeAmount > 1 : c.noticeUnit === 'weeks' ? c.noticeAmount > 4 : c.noticeAmount > 31
+
+/** Erklärt in Worten, was die Vertragsdaten bedeuten, bezogen auf `today`. */
+export function explainContract(contract: Contract, today: string): string {
+  const status = contractStatus(contract, today)
+  const end = formatDate(contract.endDate)
+
+  if (!status.renews) {
+    return status.termEnd === null
+      ? `Der Vertrag ist am ${end} ausgelaufen.`
+      : `Der Vertrag endet am ${end} ohne Verlängerung.`
+  }
+
+  const left = daysUntil(today, status.cancelBy!)
+  const remaining = left === 0 ? 'heute ist der letzte Tag' : `noch ${left} ${left === 1 ? 'Tag' : 'Tage'}`
+  const renewal = `Ohne Kündigung verlängert er sich jeweils um ${months(contract.renewalMonths)}.`
+
+  if (status.termEnd === contract.endDate) {
+    return `Um zum ${end} zu kündigen, muss die Kündigung bis ${formatDate(status.cancelBy!)} da sein (${remaining}). ${renewal}`
+  }
+  return (
+    `Die Frist für den ${end} ist am ${formatDate(cancelDeadline(contract, contract.endDate))} abgelaufen. ` +
+    `Nächster möglicher Termin ist der ${formatDate(status.termEnd!)}, die Kündigung muss bis ` +
+    `${formatDate(status.cancelBy!)} da sein (${remaining}). ${renewal}`
+  )
+}

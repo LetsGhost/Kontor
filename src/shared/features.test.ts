@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { balancesOn, accountBalance } from './balance'
 import { categoryParts, removeCategory } from './categories'
-import { cancelDeadline, contractStatus, subscriptions, upcomingDeadlines, yearlyCents } from './contracts'
+import {
+  cancelDeadline,
+  contractStatus,
+  explainContract,
+  noticeLongerThanAMonth,
+  subscriptions,
+  upcomingDeadlines,
+  yearlyCents
+} from './contracts'
 import { defaultCategories } from './defaultCategories'
 import { exportRows, toCsv, toXlsx } from './export'
 import { parseAmountQuery } from './query'
@@ -214,6 +222,19 @@ describe('Verträge', () => {
       cancelBy: null,
       renews: false
     })
+  })
+
+  it('erklärt eine verpasste Frist mit dem nächsten möglichen Termin', () => {
+    // Laufzeit bis 04.11.2026, 1 Monat Verlängerung, 4 Monate Frist, heute 05.10.2026
+    const prime = contract({ endDate: '2026-11-04', renewalMonths: 1, noticeAmount: 4 })
+    expect(explainContract(prime, '2026-10-05')).toBe(
+      'Die Frist für den 04.11.2026 ist am 04.07.2026 abgelaufen. Nächster möglicher Termin ist der 04.03.2027, ' +
+        'die Kündigung muss bis 04.11.2026 da sein (noch 30 Tage). Ohne Kündigung verlängert er sich jeweils um 1 Monat.'
+    )
+    expect(explainContract(prime, '2026-06-01')).toMatch(/^Um zum 04\.11\.2026 zu kündigen, muss die Kündigung bis 04\.07\.2026 da sein \(noch 33 Tage\)/)
+    expect(explainContract(contract({ renewalMonths: 0 }), '2027-01-02')).toBe('Der Vertrag ist am 31.12.2026 ausgelaufen.')
+    expect(noticeLongerThanAMonth(prime)).toBe(true)
+    expect(noticeLongerThanAMonth(contract({ noticeAmount: 4, noticeUnit: 'weeks' }))).toBe(false)
   })
 
   it('meldet Fristen der nächsten 30 Tage und rechnet Jahreskosten', () => {

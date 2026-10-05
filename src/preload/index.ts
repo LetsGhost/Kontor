@@ -14,7 +14,10 @@ const api: KontorApi = {
   readAttachment: (name) => ipcRenderer.invoke('readAttachment', name),
   openAttachment: (name) => ipcRenderer.invoke('openAttachment', name),
   saveExport: (defaultName, bytes) => ipcRenderer.invoke('saveExport', defaultName, bytes),
-  focusWindow: () => ipcRenderer.invoke('focusWindow')
+  focusWindow: () => ipcRenderer.invoke('focusWindow'),
+  backgroundDone: (notified) => ipcRenderer.invoke('backgroundDone', notified),
+  getAutostart: () => ipcRenderer.invoke('getAutostart'),
+  setAutostart: (enabled) => ipcRenderer.invoke('setAutostart', enabled)
 }
 
 contextBridge.exposeInMainWorld('kontor', api)

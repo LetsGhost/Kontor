@@ -84,6 +84,10 @@ Beträge sind ganze Cent. Die Schemas stehen in `src/shared/schemas.ts`.
   noch ein Backup zeigen
 - Verträge: Wiederkehrende Posten können Laufzeitende, Verlängerung und Kündigungsfrist tragen (`contract`)
 - Erinnerungen beim Start als Windows-Benachrichtigung, höchstens einmal am Tag, abschaltbar in den Einstellungen
+- Autostart („Mit Windows starten“, nur in der installierten App, standardmäßig aus): Kontor startet mit
+  `--autostart` ohne Fenster, prüft auf Erinnerungen und beendet sich sofort, wenn es keine gibt. Sonst wartet es
+  zehn Minuten auf einen Klick auf die Benachrichtigung. Der Uninstaller entfernt den Eintrag
+  (`installer/uninstall.nsh`)
 - Export der gefilterten Buchungen als XLSX (eigener Schreiber in `src/shared/xlsx.ts`, keine Abhängigkeit) oder
   CSV für deutsches Excel; aufgeteilte Buchungen ergeben eine Zeile je Teil
 - Löschen von Buchungen ohne Rückfrage, dafür mit „Rückgängig“
