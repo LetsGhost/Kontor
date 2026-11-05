@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, TriangleAlert } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { accountBalance, todayIso } from '../../../shared/balance'
+import { debtTotals, debtsByPerson } from '../../../shared/debts'
 import { formatCents } from '../../../shared/money'
 import { addMonths, budgetStatus, monthOf, monthTotals, monthlySeries, spendingByCategory } from '../../../shared/stats'
 import { DueList, useDue } from '../Due'
@@ -29,7 +30,10 @@ import { Button, Section } from '../ui'
 const HISTORY_MONTHS = 12
 
 export function Overview() {
-  const { transactions, categories, budgets } = useApp((s) => s.data)
+  const { transactions, categories, budgets, persons, debts } = useApp((s) => s.data)
+  const setPage = useApp((s) => s.setPage)
+  // Schulden gelten bereichsübergreifend.
+  const debt = useMemo(() => debtTotals(debtsByPerson(persons, debts, transactions)), [persons, debts, transactions])
   // Alles auf dieser Seite gilt für den gewählten Bereich, nie für alle Konten zusammen.
   const { area, accounts, active, ids, several } = useArea()
   const due = useDue(ids)
@@ -119,6 +123,22 @@ export function Overview() {
       {due.length > 0 && (
         <Section title="Fällige wiederkehrende Posten">
           <DueList items={due} />
+        </Section>
+      )}
+
+      {(debt.owedToMeCents > 0 || debt.iOweCents > 0) && (
+        <Section
+          title="Schulden"
+          aside={
+            <Button small variant="ghost" onClick={() => setPage('debts')}>
+              Zum Schuldenbuch
+            </Button>
+          }
+        >
+          <dl className="flex divide-x divide-line">
+            <Figure label="Dir geschuldet" value={formatCents(debt.owedToMeCents)} />
+            <Figure label="Du schuldest" value={formatCents(debt.iOweCents)} />
+          </dl>
         </Section>
       )}
 

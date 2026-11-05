@@ -1,5 +1,6 @@
 import { categoryParts } from './categories'
 import type { Category, Transaction, TransactionType } from './schemas'
+import { daysBetween } from './stats'
 
 /** Macht Empfänger vergleichbar: "REWE Markt 4711 GmbH" und "Rewe Markt" sollen sich finden. */
 export function normalizePayee(payee: string): string {
@@ -43,9 +44,6 @@ const HALF_LIFE_DAYS = 365
 
 // Für „zuletzt oft benutzt“ zählt vor allem das letzte Vierteljahr.
 const FREQUENT_HALF_LIFE_DAYS = 90
-
-const daysBetween = (from: string, to: string): number =>
-  (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
 
 const decay = (date: string, today: string, halfLife: number): number =>
   0.5 ** (Math.max(0, daysBetween(date, today)) / halfLife)
@@ -105,11 +103,21 @@ export function suggestCategories(
   const target = normalizePayee(payee)
   if (target.length < 2) return []
 
-  return rankCategories(type, transactions, categories, (tx, partCents) => {
-    const sim = similarity(target, normalizePayee(tx.payee))
-    if (sim < MIN_SIMILARITY) return 0
+  // Je Empfänger nur einmal vergleichen und Unähnliche vorab aussortieren: Beim CSV-Import läuft das für
+  // jede Zeile über alle Buchungen.
+  const simByPayee = new Map<string, number>()
+  const simOf = (tx: Transaction): number => {
+    let sim = simByPayee.get(tx.payee)
+    if (sim === undefined) {
+      sim = similarity(target, normalizePayee(tx.payee))
+      simByPayee.set(tx.payee, sim)
+    }
+    return sim
+  }
+  const similar = transactions.filter((tx) => tx.type === type && simOf(tx) >= MIN_SIMILARITY)
+  return rankCategories(type, similar, categories, (tx, partCents) => {
     const amount = amountCents === null ? 1 : amountCloseness(amountCents, partCents)
-    return sim * sim * amount * decay(tx.date, today, HALF_LIFE_DAYS)
+    return simOf(tx) ** 2 * amount * decay(tx.date, today, HALF_LIFE_DAYS)
   }).slice(0, limit)
 }
 

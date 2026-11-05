@@ -189,6 +189,13 @@ describe('Export', () => {
     expect(csv).toContain('03.05.2026;giro;Ausgabe;Laden;Shopping;Elektronik;-15,00;Kabel;-50,00;')
   })
 
+  it('entschärft Text, den Excel als Formel ausführen würde', () => {
+    const evil = tx('2026-05-01', 100, { payee: '=HYPERLINK("http://x";"a")', note: '@SUM(1)' })
+    const csv = toCsv(exportRows([evil], accounts, categories, ALL))
+    expect(csv).toContain(`;"'=HYPERLINK(""http://x"";""a"")";`)
+    expect(csv).toContain(";'@SUM(1);")
+  })
+
   it('erzeugt ein gültiges ZIP mit den XLSX-Bestandteilen', () => {
     const bytes = toXlsx(exportRows([supermarket], accounts, categories, ALL))
     expect([...bytes.slice(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04])
@@ -267,6 +274,8 @@ describe('reminders', () => {
         ],
         budgets: [{ areaId: 'area-privat', categoryId: 'cat-lebensmittel', limitCents: 1000 }],
         dismissedPatterns: [],
+        persons: [],
+        debts: [],
         transactions: [tx('2026-09-02', 2500)]
       },
       '2026-09-10'

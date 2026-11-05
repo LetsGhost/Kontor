@@ -1,7 +1,10 @@
-import { isRealDate } from './draft'
+import { effectOnAccount } from './balance'
+import { suggestPerson, type PersonDebts } from './debts'
+import { formatDate, isRealDate } from './draft'
 import { parseAmount } from './money'
-import { advance } from './recurring'
+import { advance, patternKey, recurringMarks, type RecurringMark } from './recurring'
 import type { Account, Category, Recurring, Transaction } from './schemas'
+import { daysBetween } from './stats'
 import { normalizePayee, similarity, suggestCategory } from './suggest'
 
 /** Bank-Exporte sind oft noch Windows-1252 statt UTF-8. Erst streng UTF-8 versuchen, sonst zurückfallen. */
@@ -95,6 +98,10 @@ export interface CsvMapping {
   /** Absender bei Einnahmen, falls die Bank dafür eine eigene Spalte hat */
   payer: number
   note: number
+  /** Art der Buchung laut Bank, z. B. DAUERAUFTRAG oder FOLGELASTSCHRIFT */
+  bookingText: number
+  creditor: number
+  mandate: number
 }
 
 const find = (headers: string[], ...patterns: RegExp[]): number => {
@@ -113,7 +120,10 @@ export function guessMapping(headers: string[]): CsvMapping {
     amount: find(headers, /^betrag/, /betrag|umsatz/),
     payee,
     payer: payer === payee ? -1 : payer,
-    note: find(headers, /verwendungszweck/, /buchungstext|beschreibung|text/)
+    note: find(headers, /verwendungszweck/, /buchungstext|beschreibung|text/),
+    bookingText: find(headers, /buchungstext/),
+    creditor: find(headers, /gl(ä|ae|a)ubiger/),
+    mandate: find(headers, /mandat/)
   }
 }
 
@@ -157,7 +167,7 @@ export type ImportStatus =
   | 'new'
   /** Diese Zeile wurde schon einmal importiert */
   | 'imported'
-  /** Es gibt eine von Hand erfasste Buchung mit gleichem Datum und Betrag */
+  /** Es gibt eine Buchung mit gleichem Betrag in den Tagen davor oder danach (von Hand oder als vorgemerkter Umsatz) */
   | 'similar'
   | 'invalid'
 
@@ -173,6 +183,12 @@ export interface ImportCandidate {
   note: string
   categoryId: string | null
   importHash: string
+  /** Gläubiger-ID/Mandatsreferenz, wenn die Zeile eine Lastschrift mit eigenem Mandat ist */
+  mandate: string | null
+  /** Die Bank nennt die Buchung selbst wiederkehrend (Dauerauftrag, Folgelastschrift) */
+  signal: boolean
+  /** Vorgeschlagene Person, bei der die Zeile eine Schuld begleicht. Dann ohne Kategorie. */
+  personId: string | null
 }
 
 export interface ImportOptions {
@@ -182,35 +198,51 @@ export interface ImportOptions {
   transactions: Transaction[]
   categories: Category[]
   today: string
+  /** Offene Schulden je Person, für den Vorschlag „Rückzahlung von …“ */
+  debts?: PersonDebts[]
 }
+
+// Kassenzettel-Datum vs. Buchungstag, vorgemerkt vs. gebucht.
+const DUPLICATE_WINDOW_DAYS = 2
+const PAYPAL_MERCHANT = /Ihr Einkauf bei\s+(.+?)\s*$/i
+const BANK_SIGNAL = /dauerauftr|folgelastschrift/i
+
+const daysApart = (a: string, b: string): number => Math.abs(daysBetween(a, b))
 
 /** Macht aus den CSV-Zeilen Buchungsvorschläge und markiert Dubletten und unlesbare Zeilen. */
 export function buildCandidates(table: CsvTable, mapping: CsvMapping, options: ImportOptions): ImportCandidate[] {
   const { account, transactions } = options
-  const knownHashes = new Set(transactions.map((t) => t.importHash).filter(Boolean))
-  const manual = new Set(
-    transactions
-      .filter((t) => t.importHash === null && t.accountId === account.id && t.type !== 'transfer')
-      .map((t) => `${t.date}|${t.type}|${t.amountCents}`)
-  )
+  const byHash = new Map(transactions.filter((t) => t.importHash).map((t) => [t.importHash!, t]))
+  // Jede gespeicherte Buchung kann nur eine Zeile als Dublette abdecken.
+  const used = new Set<string>()
   const seen = new Map<string, number>()
-  const cell = (row: string[], index: number): string => (index >= 0 ? (row[index] ?? '') : '')
+  const cell = (row: string[], index: number): string => (index >= 0 ? (row[index] ?? '') : '').replace(/\s+/g, ' ')
 
-  return table.rows.map((row, line) => {
+  const candidates = table.rows.map((row, line): ImportCandidate => {
     const date = parseCsvDate(cell(row, mapping.date))
     const raw = parseSignedAmount(cell(row, mapping.amount))
     const signed = raw === null ? null : options.invert ? -raw : raw
     const type = signed !== null && signed > 0 ? 'income' : 'expense'
     const payeeColumn = type === 'income' && mapping.payer >= 0 ? mapping.payer : mapping.payee
-    const payee = cell(row, payeeColumn).replace(/\s+/g, ' ')
-    const note = cell(row, mapping.note).replace(/\s+/g, ' ')
+    const rawPayee = cell(row, payeeColumn)
+    const note = cell(row, mapping.note)
+    // PayPal zieht alles über ein Mandat ein; der eigentliche Händler steht im Verwendungszweck.
+    const paypal = /paypal/i.test(rawPayee)
+    const payee = (paypal && PAYPAL_MERCHANT.exec(note)?.[1]) || rawPayee
+    const creditor = cell(row, mapping.creditor)
+    const mandateRef = cell(row, mapping.mandate)
+    const mandate = !paypal && creditor && mandateRef ? `${creditor}/${mandateRef}` : null
+    const signal = !paypal && BANK_SIGNAL.test(cell(row, mapping.bookingText))
 
-    const base = { line, type, payee, note, categoryId: null, importHash: '' } as const
+    const base = { line, type, payee, note, categoryId: null, importHash: '', mandate, signal, personId: null } as const
     if (date === null) {
       return { ...base, status: 'invalid', reason: 'Datum nicht lesbar', date: '', amountCents: 0 }
     }
-    if (signed === null || signed === 0) {
+    if (signed === null) {
       return { ...base, status: 'invalid', reason: 'Betrag nicht lesbar', date, amountCents: 0 }
+    }
+    if (signed === 0) {
+      return { ...base, status: 'invalid', reason: 'Betrag 0 €', date, amountCents: 0 }
     }
     const amountCents = Math.abs(signed)
     if (date < account.openingDate) {
@@ -218,38 +250,138 @@ export function buildCandidates(table: CsvTable, mapping: CsvMapping, options: I
     }
 
     // Zwei gleiche Zeilen in einer Datei (zweimal Kaffee am selben Tag) bekommen eine laufende Nummer,
-    // damit die zweite nicht als Dublette der ersten gilt.
-    const key = `${account.id}|${date}|${signed}|${normalizePayee(payee)}|${normalizePayee(note)}`
+    // damit die zweite nicht als Dublette der ersten gilt. Der Empfänger aus der Datei (nicht der
+    // PayPal-Händler) hält den Hash gleich zu früheren Importen.
+    const key = `${account.id}|${date}|${signed}|${normalizePayee(rawPayee)}|${normalizePayee(note)}`
     const occurrence = seen.get(key) ?? 0
     seen.set(key, occurrence + 1)
     const importHash = hash(`${key}#${occurrence}`)
+    const known = byHash.get(importHash)
+    if (known) used.add(known.id)
 
-    const status: ImportStatus = knownHashes.has(importHash)
-      ? 'imported'
-      : manual.has(`${date}|${type}|${amountCents}`)
-        ? 'similar'
-        : 'new'
-    const reason = { new: '', imported: 'Schon importiert', similar: 'Vielleicht schon von Hand erfasst' }[status]
-
+    const personId = suggestPerson(payee, type, options.debts ?? [])
     return {
       ...base,
-      status,
-      reason,
+      status: known ? 'imported' : 'new',
+      reason: known ? 'Schon importiert' : '',
       date,
       amountCents,
       importHash,
-      categoryId: suggestCategory(payee, type, transactions, options.categories, options.today, amountCents)
+      personId,
+      categoryId: personId
+        ? null
+        : suggestCategory(payee, type, transactions, options.categories, options.today, amountCents)
     }
   })
+
+  // Zweiter Durchgang, damit exakte Treffer Vorrang haben: gleiche Wirkung aufs Konto, höchstens zwei Tage Abstand.
+  // Umbuchungen zählen mit: Die Bank führt eine von Hand erfasste Umbuchung als gewöhnliche Zeile.
+  const own = transactions.filter((t) => effectOnAccount(t, account.id) !== 0)
+  for (const c of candidates) {
+    if (c.status !== 'new') continue
+    const payee = normalizePayee(c.payee)
+    const effect = c.type === 'income' ? c.amountCents : -c.amountCents
+    const match = own
+      .filter(
+        (t) =>
+          effectOnAccount(t, account.id) === effect &&
+          !used.has(t.id) &&
+          daysApart(t.date, c.date) <= DUPLICATE_WINDOW_DAYS
+      )
+      .sort(
+        (a, b) =>
+          daysApart(a.date, c.date) - daysApart(b.date, c.date) ||
+          similarity(payee, normalizePayee(b.payee)) - similarity(payee, normalizePayee(a.payee))
+      )[0]
+    if (!match) continue
+    used.add(match.id)
+    c.status = 'similar'
+    c.reason = `Gleicher Betrag wie „${match.payee || (match.type === 'transfer' ? 'Umbuchung' : 'ohne Empfänger')}“ vom ${formatDate(match.date)}`
+  }
+  return candidates
 }
 
-const DAY_MS = 86_400_000
 const RULE_WINDOW_DAYS = 7
 const RULE_SIMILARITY = 0.6
 
+const fitsRule = (r: Recurring, accountId: string, type: string, payee: string): boolean =>
+  r.active &&
+  r.accountId === accountId &&
+  r.type === type &&
+  similarity(payee, normalizePayee(r.payee)) >= RULE_SIMILARITY
+
+/** Die Regel mit dem nächstliegenden Betrag. Ein Versicherer hat oft mehrere Verträge mit demselben Empfänger. */
+const closestRule = (rules: Recurring[], amountCents: number): Recurring | undefined =>
+  rules.reduce<Recurring | undefined>(
+    (best, r) => (!best || Math.abs(r.amountCents - amountCents) < Math.abs(best.amountCents - amountCents) ? r : best),
+    undefined
+  )
+
+function toTransaction(
+  c: ImportCandidate,
+  accountId: string,
+  id: string,
+  recurringId: string | null,
+  createdAt: string
+): Transaction {
+  return {
+    id,
+    date: c.date,
+    accountId,
+    type: c.type,
+    amountCents: c.amountCents,
+    payee: c.payee,
+    note: c.note,
+    categoryId: c.categoryId,
+    transferAccountId: null,
+    recurringId,
+    importHash: c.importHash,
+    mandate: c.mandate,
+    personId: c.personId,
+    createdAt,
+    splits: [],
+    attachments: []
+  }
+}
+
+/**
+ * Welche neuen Zeilen wiederkehrend sind: passt zu einer Regel, gehört zu einem Muster aus alten Buchungen
+ * und Datei, gleiches Mandat wie eine andere Buchung, oder die Bank nennt sie Dauerauftrag/Folgelastschrift.
+ */
+export function markCandidates(
+  candidates: ImportCandidate[],
+  accountId: string,
+  transactions: Transaction[],
+  recurring: Recurring[],
+  dismissed: string[],
+  today: string
+): Map<number, RecurringMark> {
+  // Dubletten bleiben draußen, sonst stünde dieselbe Zahlung zweimal im Muster.
+  const fresh = candidates.filter((c) => c.status === 'new')
+  const pseudo = fresh.map((c) => {
+    const payee = normalizePayee(c.payee)
+    const rule = closestRule(
+      recurring.filter((r) => fitsRule(r, accountId, c.type, payee)),
+      c.amountCents
+    )
+    return toTransaction(c, accountId, `csv:${c.line}`, rule?.id ?? null, '')
+  })
+  const marks = recurringMarks([...transactions, ...pseudo], recurring, dismissed, today)
+  const skip = new Set(dismissed)
+  const result = new Map<number, RecurringMark>()
+  for (const c of fresh) {
+    const mark =
+      marks.get(`csv:${c.line}`) ??
+      (c.signal && !skip.has(patternKey(c.type, c.payee)) ? { kind: 'likely' as const, interval: null } : undefined)
+    if (mark) result.set(c.line, mark)
+  }
+  return result
+}
+
 /**
  * Erzeugt die Buchungen und verknüpft sie mit wiederkehrenden Regeln: Kommt die Miete per Import,
- * gilt der anstehende Termin als erledigt und erscheint nicht zusätzlich als fällig.
+ * gilt der anstehende Termin als erledigt und erscheint nicht zusätzlich als fällig. Frühere Zahlungen
+ * an eine Regel werden nur verknüpft, ihr Termin bleibt.
  */
 export function finishImport(
   candidates: ImportCandidate[],
@@ -265,34 +397,22 @@ export function finishImport(
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((c): Transaction => {
       const payee = normalizePayee(c.payee)
-      const rule = rules.find(
-        (r) =>
-          r.active &&
-          r.accountId === accountId &&
-          r.type === c.type &&
-          similarity(payee, normalizePayee(r.payee)) >= RULE_SIMILARITY &&
-          Math.abs(Date.parse(r.nextDueDate) - Date.parse(c.date)) <= RULE_WINDOW_DAYS * DAY_MS
+      const fitting = rules.filter((r) => fitsRule(r, accountId, c.type, payee))
+      const due = closestRule(
+        fitting.filter((r) => daysApart(r.nextDueDate, c.date) <= RULE_WINDOW_DAYS),
+        c.amountCents
       )
-      if (rule) {
-        rules = rules.map((r) => (r.id === rule.id ? advance(r, r.nextDueDate) : r))
+      if (due) {
+        rules = rules.map((r) => (r.id === due.id ? advance(r, r.nextDueDate) : r))
         linked++
       }
-      return {
-        id: makeId(),
-        date: c.date,
-        accountId,
-        type: c.type,
-        amountCents: c.amountCents,
-        payee: c.payee,
-        note: c.note,
-        categoryId: c.categoryId,
-        transferAccountId: null,
-        recurringId: rule?.id ?? null,
-        importHash: c.importHash,
-        createdAt,
-        splits: [],
-        attachments: []
-      }
+      const earlier = due
+        ? undefined
+        : closestRule(
+            fitting.filter((r) => c.date < r.nextDueDate),
+            c.amountCents
+          )
+      return toTransaction(c, accountId, makeId(), (due ?? earlier)?.id ?? null, createdAt)
     })
 
   return { transactions, recurring: rules, linked }

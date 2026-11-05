@@ -7,9 +7,11 @@ import { formatDate } from '../../../shared/draft'
 import { exportRows, toCsv, toXlsx } from '../../../shared/export'
 import { formatCents } from '../../../shared/money'
 import { matchesAmount, parseAmountQuery } from '../../../shared/query'
+import { patternKey, recurringMarks } from '../../../shared/recurring'
 import type { Transaction, TransactionType } from '../../../shared/schemas'
 import { viewOf } from '../../../shared/scope'
 import { CategorySelect } from '../CategorySelect'
+import { RecurringBadge } from '../RecurringBadge'
 import { TransactionForm } from '../TransactionForm'
 import { useArea } from '../area'
 import { CategoryIcon } from '../icons'
@@ -29,7 +31,8 @@ const typeFilters: [TransactionType | '', string][] = [
 ]
 
 export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void }) {
-  const { accounts, categories, transactions } = useApp((s) => s.data)
+  const { accounts, categories, transactions, recurring, dismissedPatterns, persons } = useApp((s) => s.data)
+  const saveCollection = useApp((s) => s.saveCollection)
   const removeTransactions = useApp((s) => s.removeTransactions)
   const putTransactions = useApp((s) => s.putTransactions)
   const showNotice = useApp((s) => s.showNotice)
@@ -76,6 +79,7 @@ export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void })
   }, [searchRequest])
 
   const accountName = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts])
+  const personName = useMemo(() => new Map(persons.map((p) => [p.id, p.name])), [persons])
   const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const iconOf = (id: string | null): string => (id && byId.get(id)?.icon) || FALLBACK_ICON
   const categoryLabel = useMemo(
@@ -113,7 +117,7 @@ export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void })
       if (!categoryFilter) return true
       return categoryParts(t).some((p) =>
         categoryFilter === WITHOUT_CATEGORY
-          ? p.categoryId === null && t.type !== 'transfer'
+          ? p.categoryId === null && t.type !== 'transfer' && !t.personId
           : p.categoryId === categoryFilter || (p.categoryId && byId.get(p.categoryId)?.parentId === categoryFilter)
       )
     }
@@ -147,6 +151,11 @@ export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void })
     return balances
   }, [accounts, accountFilter, transactions])
 
+  const marks = useMemo(
+    () => recurringMarks(transactions.filter((t) => area.ids.has(t.accountId)), recurring, dismissedPatterns, today),
+    [transactions, area.ids, recurring, dismissedPatterns, today]
+  )
+
   const visible = filtered.slice(0, limit)
   const filtersActive = Boolean(search || accountFilter || month || typeFilter || categoryFilter)
 
@@ -159,6 +168,7 @@ export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void })
   /** Betrag mit Vorzeichen. Umbuchungen zwischen zwei Konten im Blick sind weder positiv noch negativ. */
   const signed = (t: Transaction): number => {
     const view = viewOf(t, viewIds)
+    if (view === 'debt') return t.type === 'income' ? t.amountCents : -t.amountCents
     return view === 'income' ? t.amountCents : view === 'expense' ? -t.amountCents : 0
   }
 
@@ -186,7 +196,8 @@ export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void })
   }
 
   const recategorize = async (categoryId: string): Promise<void> => {
-    const targets = selection.filter((t) => t.type !== 'transfer')
+    // Schuld-Buchungen haben keine Kategorie; sie bleiben Schulden.
+    const targets = selection.filter((t) => t.type !== 'transfer' && !t.personId)
     const previous = targets.map((t) => ({ ...t }))
     // Eine neue Kategorie für die ganze Buchung ersetzt eine bisherige Aufteilung.
     await putTransactions(targets.map((t) => ({ ...t, categoryId: categoryId || null, splits: [] })))
@@ -199,7 +210,7 @@ export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void })
 
   const runExport = async (format: 'xlsx' | 'csv'): Promise<void> => {
     setExportOpen(false)
-    const rows = exportRows(selection.length > 0 ? selection : filtered, accounts, categories, viewIds)
+    const rows = exportRows(selection.length > 0 ? selection : filtered, accounts, categories, viewIds, persons)
     const name = `Kontor-Buchungen-${month || today}.${format}`
     const bytes = format === 'xlsx' ? toXlsx(rows) : new TextEncoder().encode(toCsv(rows))
     const path = await window.kontor.saveExport(name, bytes)
@@ -449,12 +460,20 @@ export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void })
                         {t.date > today && (
                           <span className="border border-line px-1.5 py-0.5 text-[10px] text-muted">geplant</span>
                         )}
+                        <RecurringBadge mark={marks.get(t.id)} />
+                        {t.personId && (
+                          <span className="shrink-0 border border-accent px-1.5 py-0.5 text-[10px] text-accent">
+                            Schuld: {personName.get(t.personId) ?? '?'}
+                          </span>
+                        )}
                       </div>
                       <div className="truncate text-xs text-muted">
                         {[
                           t.type === 'transfer'
                             ? ['Umbuchung', categoryLabel(t.categoryId)].filter(Boolean).join(' · ')
-                            : partsLabel(t) || 'Ohne Kategorie',
+                            : t.personId
+                              ? (t.type === 'income' ? 'Geld erhalten' : 'Geld gegeben')
+                              : partsLabel(t) || 'Ohne Kategorie',
                           t.type === 'transfer' ? '' : accountName.get(t.accountId),
                           t.note
                         ]
@@ -463,6 +482,18 @@ export function Transactions({ onGoToAccounts }: { onGoToAccounts: () => void })
                       </div>
                     </div>
                     <div className="flex gap-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+                      {marks.get(t.id)?.kind === 'likely' && (
+                        <Button
+                          small
+                          variant="ghost"
+                          tabIndex={-1}
+                          onClick={() =>
+                            saveCollection('dismissedPatterns', (current) => [...current, patternKey(t.type, t.payee)])
+                          }
+                        >
+                          Nicht wiederkehrend
+                        </Button>
+                      )}
                       <Button small variant="ghost" tabIndex={-1} onClick={() => setForm(t)}>
                         Bearbeiten
                       </Button>

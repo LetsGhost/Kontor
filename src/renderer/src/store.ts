@@ -10,6 +10,7 @@ export type Page =
   | 'transactions'
   | 'recurring'
   | 'contracts'
+  | 'debts'
   | 'accounts'
   | 'categories'
   | 'settings'
@@ -21,6 +22,7 @@ export const PAGES: Page[] = [
   'transactions',
   'recurring',
   'contracts',
+  'debts',
   'accounts',
   'categories',
   'settings'
@@ -108,6 +110,8 @@ const emptyData: KontorData = {
   recurring: [],
   budgets: [],
   dismissedPatterns: [],
+  persons: [],
+  debts: [],
   transactions: []
 }
 

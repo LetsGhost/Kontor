@@ -1,6 +1,6 @@
 import { categoryParts } from './categories'
 import { formatDate } from './draft'
-import type { Account, Category, Transaction } from './schemas'
+import type { Account, Category, Person, Transaction } from './schemas'
 import { viewOf, type Ids } from './scope'
 import { buildXlsx, type XlsxCell, type XlsxColumn } from './xlsx'
 
@@ -18,6 +18,8 @@ export interface ExportRow {
   /** Bei Aufteilungen der Gesamtbetrag der Buchung, sonst leer */
   splitOfCents: number | null
   attachments: number
+  /** Person einer Schuld-Buchung, sonst leer */
+  person: string
 }
 
 const typeLabel = { expense: 'Ausgabe', income: 'Einnahme', transfer: 'Umbuchung' }
@@ -26,9 +28,11 @@ export function exportRows(
   transactions: Transaction[],
   accounts: Account[],
   categories: Category[],
-  ids: Ids
+  ids: Ids,
+  persons: Person[] = []
 ): ExportRow[] {
   const accountName = new Map(accounts.map((a) => [a.id, a.name]))
+  const personName = new Map(persons.map((p) => [p.id, p.name]))
   const byId = new Map(categories.map((c) => [c.id, c]))
   const names = (categoryId: string | null): { mainCategory: string; category: string } => {
     const category = categoryId ? byId.get(categoryId) : undefined
@@ -41,7 +45,8 @@ export function exportRows(
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
     .flatMap((tx) => {
       const view = viewOf(tx, ids)
-      const sign = view === 'income' ? 1 : view === 'expense' ? -1 : 0
+      const sign =
+        view === 'income' ? 1 : view === 'expense' ? -1 : view === 'debt' ? (tx.type === 'income' ? 1 : -1) : 0
       const account =
         tx.type === 'transfer'
           ? `${accountName.get(tx.accountId) ?? '?'} → ${accountName.get(tx.transferAccountId ?? '') ?? '?'}`
@@ -56,7 +61,8 @@ export function exportRows(
         amountCents: sign * part.amountCents,
         note: [tx.note, split ? tx.splits[i].note : ''].filter(Boolean).join(' · '),
         splitOfCents: split ? sign * tx.amountCents : null,
-        attachments: tx.attachments.length
+        attachments: tx.attachments.length,
+        person: tx.personId ? (personName.get(tx.personId) ?? '') : ''
       }))
     })
 }
@@ -71,10 +77,15 @@ const columns: (XlsxColumn & { value: (row: ExportRow) => XlsxCell })[] = [
   { header: 'Betrag', kind: 'money', width: 13, value: (r) => r.amountCents },
   { header: 'Notiz', kind: 'text', width: 32, value: (r) => r.note },
   { header: 'Teil von', kind: 'money', width: 13, value: (r) => r.splitOfCents },
-  { header: 'Belege', kind: 'text', width: 8, value: (r) => (r.attachments > 0 ? String(r.attachments) : '') }
+  { header: 'Belege', kind: 'text', width: 8, value: (r) => (r.attachments > 0 ? String(r.attachments) : '') },
+  { header: 'Person', kind: 'text', width: 18, value: (r) => r.person }
 ]
 
-const csvCell = (value: string): string => (/[;"\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
+// Empfänger und Verwendungszweck schreibt der Absender. Excel führt Text, der mit = + - @ beginnt, als Formel aus.
+const csvCell = (raw: string): string => {
+  const value = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw
+  return /[;"\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+}
 const csvMoney = (cents: number): string => (cents / 100).toFixed(2).replace('.', ',')
 
 /** CSV, wie Excel sie in Deutschland erwartet: Semikolon, Dezimalkomma, BOM für die Umlaute. */

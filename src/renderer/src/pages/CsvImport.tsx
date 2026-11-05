@@ -6,29 +6,38 @@ import {
   decodeCsv,
   finishImport,
   guessMapping,
+  markCandidates,
   parseCsv,
   toTable,
   type CsvMapping,
   type CsvTable,
   type ImportCandidate
 } from '../../../shared/csv'
+import { debtsByPerson } from '../../../shared/debts'
 import { formatDate } from '../../../shared/draft'
 import { formatCents } from '../../../shared/money'
+import { occurrence, patternKey } from '../../../shared/recurring'
+import type { Recurring as Rule } from '../../../shared/schemas'
 import { CategorySelect } from '../CategorySelect'
+import { RecurringBadge } from '../RecurringBadge'
 import { useArea } from '../area'
 import { useApp } from '../store'
 import { Button, Field, Section, inputClass } from '../ui'
+import { RuleForm } from './Recurring'
 
 const mappingFields: [keyof CsvMapping, string, boolean][] = [
   ['date', 'Datum', true],
   ['amount', 'Betrag', true],
   ['payee', 'Empfänger', false],
   ['payer', 'Absender bei Einnahmen', false],
-  ['note', 'Verwendungszweck', false]
+  ['note', 'Verwendungszweck', false],
+  ['bookingText', 'Buchungstext', false],
+  ['creditor', 'Gläubiger-ID', false],
+  ['mandate', 'Mandatsreferenz', false]
 ]
 
 export function CsvImport({ onClose }: { onClose: () => void }) {
-  const { accounts, transactions, categories, recurring } = useApp((s) => s.data)
+  const { accounts, transactions, categories, recurring, dismissedPatterns, persons, debts } = useApp((s) => s.data)
   const putTransactions = useApp((s) => s.putTransactions)
   const saveCollection = useApp((s) => s.saveCollection)
   const { active } = useArea()
@@ -42,17 +51,46 @@ export function CsvImport({ onClose }: { onClose: () => void }) {
   // Abweichungen von der Vorgabe je Zeile: Haken und Kategorie
   const [picked, setPicked] = useState<Record<number, boolean>>({})
   const [categoryOf, setCategoryOf] = useState<Record<number, string>>({})
+  // Abgewählte Schuld-Vorschläge
+  const [noPerson, setNoPerson] = useState<Record<number, boolean>>({})
   const [done, setDone] = useState<{ count: number; linked: number } | null>(null)
+  const [ruleDraft, setRuleDraft] = useState<Partial<Rule> | null>(null)
 
   const account = accounts.find((a) => a.id === accountId)
 
+  const debtRows = useMemo(() => debtsByPerson(persons, debts, transactions), [persons, debts, transactions])
+  const personName = new Map(persons.map((p) => [p.id, p.name]))
   const candidates = useMemo(
     () =>
       table && mapping && account
-        ? buildCandidates(table, mapping, { account, invert, transactions, categories, today: todayIso() })
+        ? buildCandidates(table, mapping, { account, invert, transactions, categories, today: todayIso(), debts: debtRows })
         : [],
-    [table, mapping, account, invert, transactions, categories]
+    [table, mapping, account, invert, transactions, categories, debtRows]
   )
+  const personFor = (c: ImportCandidate): string | null => (noPerson[c.line] ? null : c.personId)
+  const marks = useMemo(
+    () => markCandidates(candidates, accountId, transactions, recurring, dismissedPatterns, todayIso()),
+    [candidates, accountId, transactions, recurring, dismissedPatterns]
+  )
+  const categoryFor = (c: ImportCandidate): string | null =>
+    c.line in categoryOf ? categoryOf[c.line] || null : c.categoryId
+
+  const openRule = (c: ImportCandidate): void => {
+    const interval = marks.get(c.line)?.interval ?? 'monthly'
+    const next = occurrence(c.date, interval, 1)
+    setRuleDraft({
+      type: c.type,
+      accountId,
+      amountCents: c.amountCents,
+      payee: c.payee,
+      categoryId: categoryFor(c),
+      interval,
+      startDate: next,
+      nextDueDate: next
+    })
+  }
+  const notRecurring = (c: ImportCandidate): Promise<void> =>
+    saveCollection('dismissedPatterns', (current) => [...current, patternKey(c.type, c.payee)])
 
   const isPicked = (c: ImportCandidate): boolean => picked[c.line] ?? c.status === 'new'
   const canPick = (c: ImportCandidate): boolean => c.status === 'new' || c.status === 'similar'
@@ -66,6 +104,7 @@ export function CsvImport({ onClose }: { onClose: () => void }) {
     setError(null)
     setPicked({})
     setCategoryOf({})
+    setNoPerson({})
     const parsed = toTable(parseCsv(decodeCsv(new Uint8Array(await file.arrayBuffer()))))
     if (!parsed) {
       setTable(null)
@@ -80,7 +119,10 @@ export function CsvImport({ onClose }: { onClose: () => void }) {
 
   const runImport = async (): Promise<void> => {
     const result = finishImport(
-      selected.map((c) => ({ ...c, categoryId: c.line in categoryOf ? categoryOf[c.line] || null : c.categoryId })),
+      selected.map((c) => {
+        const personId = personFor(c)
+        return { ...c, personId, categoryId: personId ? null : categoryFor(c) }
+      }),
       accountId,
       recurring,
       () => crypto.randomUUID(),
@@ -216,16 +258,40 @@ export function CsvImport({ onClose }: { onClose: () => void }) {
                     />
                     <span className="num w-24 shrink-0">{c.date ? formatDate(c.date) : '—'}</span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate">{c.payee || (c.type === 'income' ? 'Einnahme' : 'Ausgabe')}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="truncate">{c.payee || (c.type === 'income' ? 'Einnahme' : 'Ausgabe')}</span>
+                        <RecurringBadge mark={marks.get(c.line)} />
+                        {marks.get(c.line)?.kind === 'likely' && (
+                          <>
+                            <Button small variant="ghost" onClick={() => openRule(c)}>
+                              Als Regel anlegen
+                            </Button>
+                            <Button small variant="ghost" onClick={() => notRecurring(c)}>
+                              Nicht wiederkehrend
+                            </Button>
+                          </>
+                        )}
+                      </div>
                       <div className="truncate text-xs text-muted">{[c.reason, c.note].filter(Boolean).join(' · ')}</div>
                     </div>
                     <div className="w-40 shrink-0 xl:w-56">
-                      {canPick(c) && (
-                        <CategorySelect
-                          kind={c.type}
-                          value={c.line in categoryOf ? categoryOf[c.line] : (c.categoryId ?? '')}
-                          onChange={(categoryId) => setCategoryOf({ ...categoryOf, [c.line]: categoryId })}
-                        />
+                      {canPick(c) && personFor(c) ? (
+                        <div className="flex items-center gap-1">
+                          <span className="truncate border border-accent px-1.5 py-0.5 text-[10px] text-accent">
+                            Schuld: {personName.get(personFor(c)!) ?? '?'}
+                          </span>
+                          <Button small variant="ghost" onClick={() => setNoPerson({ ...noPerson, [c.line]: true })}>
+                            Keine Schuld
+                          </Button>
+                        </div>
+                      ) : (
+                        canPick(c) && (
+                          <CategorySelect
+                            kind={c.type}
+                            value={c.line in categoryOf ? categoryOf[c.line] : (c.categoryId ?? '')}
+                            onChange={(categoryId) => setCategoryOf({ ...categoryOf, [c.line]: categoryId })}
+                          />
+                        )
                       )}
                     </div>
                     <span className={`num w-28 shrink-0 text-right ${c.type === 'income' && canPick(c) ? 'text-plus' : ''}`}>
@@ -248,6 +314,8 @@ export function CsvImport({ onClose }: { onClose: () => void }) {
           )}
         </>
       )}
+
+      {ruleDraft && <RuleForm editing={null} prefill={ruleDraft} onClose={() => setRuleDraft(null)} />}
     </div>
   )
 }

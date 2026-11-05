@@ -6,6 +6,15 @@ import { idsOf, viewOf, type Ids } from './scope'
 /** Monate werden durchgehend als "JJJJ-MM" geführt. */
 export const monthOf = (date: string): string => date.slice(0, 7)
 
+const DAY_MS = 86_400_000
+const toMs = (date: string): number => Date.parse(`${date}T00:00:00Z`)
+
+/** Tage von `from` bis `to` (JJJJ-MM-TT), negativ, wenn `to` früher liegt. */
+export const daysBetween = (from: string, to: string): number => Math.round((toMs(to) - toMs(from)) / DAY_MS)
+
+export const addDays = (date: string, days: number): string =>
+  new Date(toMs(date) + days * DAY_MS).toISOString().slice(0, 10)
+
 export function addMonths(month: string, delta: number): string {
   const [year, m] = month.split('-').map(Number)
   const index = year * 12 + (m - 1) + delta

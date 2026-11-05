@@ -1,5 +1,5 @@
 import type { Recurring, Transaction, TransactionType } from './schemas'
-import { addMonths, lastDayOfMonth } from './stats'
+import { addDays, addMonths, daysBetween, lastDayOfMonth } from './stats'
 import { normalizePayee } from './suggest'
 
 type Interval = Recurring['interval']
@@ -12,12 +12,6 @@ export const intervalLabel: Record<Interval, string> = {
 }
 
 const MONTHS_PER_STEP = { monthly: 1, quarterly: 3, yearly: 12 }
-const DAY_MS = 86_400_000
-
-const toMs = (date: string): number => Date.parse(`${date}T00:00:00Z`)
-const daysBetween = (from: string, to: string): number => Math.round((toMs(to) - toMs(from)) / DAY_MS)
-const addDays = (date: string, days: number): string =>
-  new Date(toMs(date) + days * DAY_MS).toISOString().slice(0, 10)
 
 /**
  * Der k-te Termin einer Regel, immer vom Startdatum aus gerechnet. So bleibt der 31. als Wunschtag
@@ -190,4 +184,37 @@ export function detectPatterns(
   }
 
   return patterns.sort((a, b) => b.amountCents - a.amountCents)
+}
+
+/** 'rule' = gehört zu einer Regel, 'likely' = sieht wiederkehrend aus, es gibt aber noch keine Regel. */
+export interface RecurringMark {
+  kind: 'rule' | 'likely'
+  /** Erkannter Rhythmus, falls ein Muster dahintersteht */
+  interval: Interval | null
+}
+
+/**
+ * Markierungen für Buchungen: mit Regel verknüpft, Teil eines erkannten Musters oder gleiches
+ * Lastschrift-Mandat wie eine andere Buchung. Abgelehnte Empfänger bekommen keine 'likely'-Markierung.
+ */
+export function recurringMarks(
+  transactions: Transaction[],
+  recurring: Recurring[],
+  dismissed: string[],
+  today: string
+): Map<string, RecurringMark> {
+  const marks = new Map<string, RecurringMark>()
+  for (const p of detectPatterns(transactions, recurring, dismissed, today)) {
+    for (const id of p.transactionIds) marks.set(id, { kind: 'likely', interval: p.interval })
+  }
+  const skip = new Set(dismissed)
+  const mandates = new Map<string, number>()
+  for (const tx of transactions) if (tx.mandate) mandates.set(tx.mandate, (mandates.get(tx.mandate) ?? 0) + 1)
+  for (const tx of transactions) {
+    if (tx.recurringId) marks.set(tx.id, { kind: 'rule', interval: null })
+    else if (!marks.has(tx.id) && tx.mandate && mandates.get(tx.mandate)! > 1 && !skip.has(patternKey(tx.type, tx.payee))) {
+      marks.set(tx.id, { kind: 'likely', interval: null })
+    }
+  }
+  return marks
 }

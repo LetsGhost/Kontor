@@ -39,7 +39,7 @@ export function TransactionForm({
   defaultAccountId: string
   onClose: () => void
 }) {
-  const { accounts, categories, transactions } = useApp((s) => s.data)
+  const { accounts, categories, transactions, persons } = useApp((s) => s.data)
   const putTransactions = useApp((s) => s.putTransactions)
   const amountRef = useRef<HTMLInputElement>(null)
   const payeeRef = useRef<HTMLInputElement>(null)
@@ -58,6 +58,8 @@ export function TransactionForm({
   )
   const [splitError, setSplitError] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<string[]>(editing?.attachments ?? [])
+  // Schuld-Buchung: Geld an oder von dieser Person, dann ohne Kategorie
+  const [personId, setPersonId] = useState(editing?.personId ?? '')
   const [draft, setDraft] = useState<TransactionDraft>(() =>
     editing
       ? {
@@ -205,7 +207,8 @@ export function TransactionForm({
     setErrors({})
     setSaveError(null)
 
-    const split = splits && !isTransfer ? checkSplits(splits, result.values.amountCents) : null
+    const debtPerson = !isTransfer && personId ? personId : null
+    const split = splits && !isTransfer && !debtPerson ? checkSplits(splits, result.values.amountCents) : null
     if (split && !split.ok) {
       setSplitError(split.error)
       return
@@ -223,6 +226,8 @@ export function TransactionForm({
           }),
           ...result.values,
           ...(split?.ok ? { categoryId: null, splits: split.splits } : { splits: [] }),
+          ...(debtPerson ? { categoryId: null } : {}),
+          personId: debtPerson,
           attachments
         }
       ])
@@ -240,6 +245,7 @@ export function TransactionForm({
     setCategoryTouched(false)
     setSplits(null)
     setAttachments([])
+    setPersonId('')
     setSavedCount((n) => n + 1)
     ;(isTransfer ? amountRef : payeeRef).current?.focus()
   }
@@ -321,7 +327,22 @@ export function TransactionForm({
           </Field>
         </div>
 
-        {!isTransfer && !splits && (
+        {!isTransfer && (persons.length > 0 || personId) && (
+          <Field label="Schuld mit Person (zählt nicht als Ausgabe/Einnahme)">
+            <select className={inputClass} value={personId} onChange={(e) => setPersonId(e.target.value)}>
+              <option value="">Keine Schuld</option>
+              {persons
+                .filter((p) => !p.archived || p.id === personId)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        )}
+
+        {!isTransfer && !splits && !personId && (
           <div className="space-y-1">
             <Field label="Kategorie">
               <CategorySelect
@@ -350,7 +371,7 @@ export function TransactionForm({
           </div>
         )}
 
-        {!isTransfer && splits && (
+        {!isTransfer && splits && !personId && (
           <div className="space-y-2">
             <div className="flex items-baseline justify-between text-xs text-muted">
               <span>Aufteilung</span>

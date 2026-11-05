@@ -210,7 +210,7 @@ export function Recurring() {
                     viewOf(rule, area.ids) === 'income' && rule.active ? 'text-plus' : ''
                   }`}
                 >
-                  {{ income: '+', expense: '−', internal: '', outside: '' }[viewOf(rule, area.ids)]}
+                  {{ income: '+', expense: '−', internal: '', debt: '', outside: '' }[viewOf(rule, area.ids)]}
                   {formatCents(rule.amountCents)}
                 </span>
               </li>
@@ -224,25 +224,35 @@ export function Recurring() {
   )
 }
 
-function RuleForm({ editing, onClose }: { editing: Rule | null; onClose: () => void }) {
+/** `prefill` füllt eine neue Regel vor, etwa aus dem CSV-Import; `editing` bearbeitet eine bestehende. */
+export function RuleForm({
+  editing,
+  prefill,
+  onClose
+}: {
+  editing: Rule | null
+  prefill?: Partial<Rule>
+  onClose: () => void
+}) {
   const { accounts, recurring } = useApp((s) => s.data)
   const saveCollection = useApp((s) => s.saveCollection)
   const area = useArea()
+  const start = editing ?? prefill
   const selectable = accounts.filter(
-    (a) => !a.archived || a.id === editing?.accountId || a.id === editing?.transferAccountId
+    (a) => !a.archived || a.id === start?.accountId || a.id === start?.transferAccountId
   )
   const [draft, setDraft] = useState<TransactionDraft>({
-    type: editing?.type ?? 'expense',
-    date: editing?.nextDueDate ?? todayIso(),
-    accountId: editing?.accountId ?? area.active[0]?.id ?? '',
-    transferAccountId: editing?.transferAccountId ?? '',
-    amount: editing ? centsToInput(editing.amountCents) : '',
-    payee: editing?.payee ?? '',
-    note: editing?.note ?? '',
-    categoryId: editing?.categoryId ?? ''
+    type: start?.type ?? 'expense',
+    date: start?.nextDueDate ?? todayIso(),
+    accountId: start?.accountId ?? area.active[0]?.id ?? '',
+    transferAccountId: start?.transferAccountId ?? '',
+    amount: start?.amountCents !== undefined ? centsToInput(start.amountCents) : '',
+    payee: start?.payee ?? '',
+    note: start?.note ?? '',
+    categoryId: start?.categoryId ?? ''
   })
-  const [interval, setRhythm] = useState<Rule['interval']>(editing?.interval ?? 'monthly')
-  const [endDate, setEndDate] = useState(editing?.endDate ?? '')
+  const [interval, setRhythm] = useState<Rule['interval']>(start?.interval ?? 'monthly')
+  const [endDate, setEndDate] = useState(start?.endDate ?? '')
   const [errors, setErrors] = useState<DraftErrors & { payee?: string; endDate?: string }>({})
 
   const update = (patch: Partial<TransactionDraft>): void => setDraft((d) => ({ ...d, ...patch }))

@@ -125,6 +125,8 @@ export class Store {
       recurring: readJson(this.file('recurring.json'), collectionSchemas.recurring, []),
       budgets: readJson(this.file('budgets.json'), collectionSchemas.budgets, []),
       dismissedPatterns: readJson(this.file('dismissedPatterns.json'), collectionSchemas.dismissedPatterns, []),
+      persons: readJson(this.file('persons.json'), collectionSchemas.persons, []),
+      debts: readJson(this.file('debts.json'), collectionSchemas.debts, []),
       transactions
     }
   }

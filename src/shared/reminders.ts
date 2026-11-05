@@ -1,4 +1,5 @@
 import { describeDeadline, upcomingDeadlines } from './contracts'
+import { debtsByPerson, overdueDebts } from './debts'
 import { formatCents } from './money'
 import { dueDates } from './recurring'
 import type { KontorData } from './schemas'
@@ -6,7 +7,7 @@ import { areaAccounts, idsOf } from './scope'
 import { budgetStatus, monthOf } from './stats'
 
 export interface Reminder {
-  kind: 'due' | 'budget' | 'contract'
+  kind: 'due' | 'budget' | 'contract' | 'debt'
   title: string
   body: string
 }
@@ -62,6 +63,24 @@ export function reminders(data: KontorData, today: string): Reminder[] {
           ? `Kündigungsfrist: ${deadlines[0].rule.payee}`
           : `${deadlines.length} Kündigungsfristen laufen bald ab`,
       body: listing(deadlines.map((d) => (deadlines.length === 1 ? describeDeadline(d) : `${d.rule.payee}: ${describeDeadline(d)}`)))
+    })
+  }
+
+  const overdue = overdueDebts(debtsByPerson(data.persons, data.debts, data.transactions), today)
+  if (overdue.length > 0) {
+    result.push({
+      kind: 'debt',
+      title:
+        overdue.length === 1
+          ? `Schulden mit ${overdue[0].person.name} sind fällig`
+          : `${overdue.length} Schulden sind fällig`,
+      body: listing(
+        overdue.map((r) =>
+          r.balanceCents > 0
+            ? `${r.person.name} schuldet dir ${formatCents(r.balanceCents)}`
+            : `Du schuldest ${r.person.name} ${formatCents(-r.balanceCents)}`
+        )
+      )
     })
   }
 

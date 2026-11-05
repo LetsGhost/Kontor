@@ -3,6 +3,7 @@ import {
   ChartColumn,
   FileSignature,
   FolderOpen,
+  HandCoins,
   Landmark,
   Repeat,
   ScrollText,
@@ -19,6 +20,7 @@ import { useArea } from './area'
 import { Accounts } from './pages/Accounts'
 import { Categories } from './pages/Categories'
 import { Contracts } from './pages/Contracts'
+import { Debts } from './pages/Debts'
 import { Forecast } from './pages/Forecast'
 import { Overview } from './pages/Overview'
 import { Recurring } from './pages/Recurring'
@@ -34,6 +36,7 @@ const pages: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: 'transactions', label: 'Buchungen', icon: ScrollText },
   { id: 'recurring', label: 'Wiederkehrend', icon: Repeat },
   { id: 'contracts', label: 'Verträge & Abos', icon: FileSignature },
+  { id: 'debts', label: 'Schulden', icon: HandCoins },
   { id: 'accounts', label: 'Konten', icon: Landmark },
   { id: 'categories', label: 'Kategorien', icon: Tags },
   { id: 'settings', label: 'Einstellungen', icon: SettingsIcon }
@@ -99,7 +102,7 @@ export function App() {
             onClick={() => setPage(id)}
             aria-current={page === id ? 'page' : undefined}
             aria-label={label}
-            title={`${label} (Strg+${i + 1})`}
+            title={i < 9 ? `${label} (Strg+${i + 1})` : label}
             className={`relative flex items-center justify-center gap-2.5 border-l-2 py-2 text-left text-sm lg:justify-start lg:px-[18px] ${
               page === id ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'
             }`}
@@ -125,6 +128,7 @@ export function App() {
           {page === 'transactions' && <Transactions onGoToAccounts={() => setPage('accounts')} />}
           {page === 'recurring' && <Recurring />}
           {page === 'contracts' && <Contracts />}
+          {page === 'debts' && <Debts />}
           {page === 'accounts' && <Accounts />}
           {page === 'categories' && <Categories />}
           {page === 'settings' && <Settings />}

@@ -100,7 +100,8 @@ const remindersEnabled = (): boolean => readSetting(REMINDERS_KEY) !== 'off'
 const targetPage: Record<Reminder['kind'], Page> = {
   due: 'overview',
   budget: 'overview',
-  contract: 'contracts'
+  contract: 'contracts',
+  debt: 'debts'
 }
 
 function notify(items: Reminder[], setPage: (page: Page) => void): void {

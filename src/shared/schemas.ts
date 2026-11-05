@@ -104,6 +104,10 @@ export const transactionSchema = z
     recurringId: id.nullable(),
     // Für den CSV-Import (Duplikat-Erkennung)
     importHash: z.string().nullable(),
+    // Gläubiger-ID/Mandatsreferenz einer SEPA-Lastschrift aus dem CSV-Import. Optional, damit ältere Daten ohne Migration gültig bleiben.
+    mandate: z.string().nullable().optional(),
+    // Schuld-Buchung: Geld an oder von dieser Person. Zählt nicht als Ausgabe/Einnahme. Optional, damit ältere Daten gültig bleiben.
+    personId: id.nullable().optional(),
     createdAt: z.string(),
     splits: z.array(splitSchema),
     attachments: z.array(attachmentNameSchema)
@@ -141,6 +145,26 @@ export const budgetSchema = z.object({
   limitCents: cents.positive()
 })
 
+/** Jemand, mit dem es Schulden gibt. Erkennungsnamen helfen dem CSV-Import, Zahlungen zuzuordnen. */
+export const personSchema = z.object({
+  id,
+  name: z.string().min(1),
+  aliases: z.array(z.string()),
+  // Bis wann der offene Saldo beglichen sein soll; danach erinnert Kontor
+  dueDate: isoDate.nullable(),
+  archived: z.boolean()
+})
+
+/** Schuld ohne Kontobewegung, etwa wenn jemand bar für dich bezahlt hat. */
+export const debtSchema = z.object({
+  id,
+  personId: id,
+  date: isoDate,
+  direction: z.enum(['owedToMe', 'iOwe']),
+  amountCents: cents.positive(),
+  note: z.string()
+})
+
 export const collectionSchemas = {
   areas: z.array(areaSchema),
   accounts: z.array(accountSchema),
@@ -148,7 +172,9 @@ export const collectionSchemas = {
   recurring: z.array(recurringSchema),
   budgets: z.array(budgetSchema),
   // Erkannte Muster, die nicht als wiederkehrend angelegt werden sollen (Schlüssel aus patternKey)
-  dismissedPatterns: z.array(z.string())
+  dismissedPatterns: z.array(z.string()),
+  persons: z.array(personSchema),
+  debts: z.array(debtSchema)
 }
 export const transactionsSchema = z.array(transactionSchema)
 
@@ -162,6 +188,8 @@ export type Recurring = z.infer<typeof recurringSchema>
 export type Budget = z.infer<typeof budgetSchema>
 export type Split = z.infer<typeof splitSchema>
 export type Contract = z.infer<typeof contractSchema>
+export type Person = z.infer<typeof personSchema>
+export type Debt = z.infer<typeof debtSchema>
 
 export type CollectionName = keyof typeof collectionSchemas
 
@@ -172,5 +200,7 @@ export interface KontorData {
   recurring: Recurring[]
   budgets: Budget[]
   dismissedPatterns: string[]
+  persons: Person[]
+  debts: Debt[]
   transactions: Transaction[]
 }

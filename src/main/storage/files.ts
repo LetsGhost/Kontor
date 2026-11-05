@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { z } from 'zod'
 
@@ -38,14 +38,8 @@ export function renameWithRetry(from: string, to: string, rename = renameSync, s
 /** Schreibt erst in eine temp-Datei und benennt dann um, damit nie eine halbe Datei entsteht. */
 export function writeBytesAtomic(file: string, data: string | Uint8Array): void {
   const tmp = `${file}.tmp`
-  const fd = openSync(tmp, 'w')
-  try {
-    if (typeof data === 'string') writeSync(fd, data)
-    else writeSync(fd, data)
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
-  }
+  // flush: fsync vor dem Umbenennen, damit nach einem Absturz keine leere Datei übrig bleibt.
+  writeFileSync(tmp, data, { flush: true })
   renameWithRetry(tmp, file)
 }
 

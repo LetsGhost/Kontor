@@ -1,11 +1,7 @@
 import { formatDate } from './draft'
 import { occurrence } from './recurring'
 import type { Contract, Recurring } from './schemas'
-
-const DAY_MS = 86_400_000
-const toMs = (date: string): number => Date.parse(`${date}T00:00:00Z`)
-export const daysUntil = (from: string, to: string): number => Math.round((toMs(to) - toMs(from)) / DAY_MS)
-const addDays = (date: string, days: number): string => new Date(toMs(date) + days * DAY_MS).toISOString().slice(0, 10)
+import { addDays, daysBetween } from './stats'
 
 /** Monate auf ein Datum, der Tag wird bei kürzeren Monaten auf den Monatsletzten gekürzt. */
 const addMonthsToDate = (date: string, months: number): string => occurrence(date, 'monthly', months)
@@ -91,7 +87,7 @@ export function upcomingDeadlines(rules: Recurring[], today: string, withinDays 
       if (!rule.active || !rule.contract || rule.contract.renewalMonths === 0) return []
       const { termEnd, cancelBy } = contractStatus(rule.contract, today)
       if (!termEnd || !cancelBy) return []
-      const daysLeft = daysUntil(today, cancelBy)
+      const daysLeft = daysBetween(today, cancelBy)
       return daysLeft <= withinDays ? [{ rule, cancelBy, termEnd, daysLeft }] : []
     })
     .sort((a, b) => a.cancelBy.localeCompare(b.cancelBy))
@@ -119,7 +115,7 @@ export function explainContract(contract: Contract, today: string): string {
       : `Der Vertrag endet am ${end} ohne Verlängerung.`
   }
 
-  const left = daysUntil(today, status.cancelBy!)
+  const left = daysBetween(today, status.cancelBy!)
   const remaining = left === 0 ? 'heute ist der letzte Tag' : `noch ${left} ${left === 1 ? 'Tag' : 'Tage'}`
   const renewal = `Ohne Kündigung verlängert er sich jeweils um ${months(contract.renewalMonths)}.`
 
